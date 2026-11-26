@@ -2,7 +2,7 @@
 {
 const VERSION = '1.0';
 const API = 'https://rebrickable.com/api/v3/lego';
-const DEFAULT_SHEET = '1HekhfF-EKmACBOsQTrKQqGOHZBXGsLlwcpCUyETmbHQ';
+const DEFAULT_SHEET = '';
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = n => Number(n || 0).toLocaleString('de-DE');
@@ -76,7 +76,7 @@ function parseCSV(t) {
 }
 async function loadLocs() {
   const id = S.settings.sheetId.trim();
-  if (!id) throw new Error('Keine Tabellen-ID');
+  if (!id) throw new Error('Bitte die ID der Google-Tabelle eintragen.');
   const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('Kästchen')}`;
   let res;
   try { res = await fetch(url, { cache: 'no-store' }); } catch (e) { throw new Error('Tabelle nicht erreichbar. Bist du online, und ist die Tabelle per Link lesbar?'); }
@@ -344,7 +344,7 @@ document.addEventListener('click', async ev => {
   if (a === 'cpcsv') return copyOut(shopCSV());
   if (a === 'cpxml') return copyOut(await shopXML());
   if (a === 'savecfg' || a === 'locs') {
-    S.settings.key = $('#k').value.trim(); S.settings.sheetId = $('#sh').value.trim() || DEFAULT_SHEET; save('settings');
+    S.settings.key = $('#k').value.trim(); S.settings.sheetId = $('#sh').value.trim(); save('settings');
     if (a === 'savecfg') { toast('Gespeichert'); return; }
     el.disabled = true; el.textContent = 'Lade …';
     try { const n = await loadLocs(); toast(fmt(n) + ' Teilenummern geladen'); } catch (e) { toast(e.message); }
