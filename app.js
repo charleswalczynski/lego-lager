@@ -1,6 +1,6 @@
 'use strict';
 {
-const VERSION = '1.3';
+const VERSION = '1.4';
 const API = 'https://rebrickable.com/api/v3/lego';
 const DEFAULT_SHEET = '';
 const $ = s => document.querySelector(s);
@@ -35,7 +35,7 @@ const S = { settings: { key: '', sheetId: DEFAULT_SHEET }, locs: { map: {}, labe
 const saveT = {};
 function save(k) { clearTimeout(saveT[k]); saveT[k] = setTimeout(() => idb.set(k, S[k]).catch(() => toast('Speichern fehlgeschlagen')), 250); }
 
-let hideDone = true, busy = null, armed = null, query = '';
+let hideDone = true, busy = null, armed = null, query = '', addOpen = false, printNew = true;
 const toast = t => { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(e._t); e._t = setTimeout(() => e.classList.remove('on'), 2600); };
 
 /* ---------- Teilenummern & Standorte ---------- */
@@ -201,17 +201,20 @@ function status(s) {
 function route() {
   const h = decodeURIComponent(location.hash.slice(1));
   if (h.startsWith('set/')) return { v: 'set', id: h.slice(4) };
+  if (h.startsWith('print/')) return { v: 'print', id: h.slice(6) };
+  if (h === 'print') return { v: 'print' };
   if (h === 'shop' || h === 'settings') return { v: h };
   return { v: 'sets' };
 }
 function render() {
   const r = route();
-  for (const t of ['sets', 'shop', 'settings']) $('#t-' + t).classList.toggle('on', (r.v === 'set' ? 'sets' : r.v) === t);
+  for (const t of ['sets', 'shop', 'settings']) $('#t-' + t).classList.toggle('on', (r.v === 'set' || r.v === 'print' ? 'sets' : r.v) === t);
   const n = Object.keys(S.sets).length;
   $('#t-sets').textContent = n ? `Sets (${n})` : 'Sets';
   const m = $('#main');
   if (r.v === 'settings') m.innerHTML = vSettings();
   else if (r.v === 'shop') m.innerHTML = vShop();
+  else if (r.v === 'print') m.innerHTML = vPrint(r.id);
   else if (r.v === 'set') { const s = S.sets[r.id]; m.innerHTML = s ? vSet(s) : '<p class="empty">Set nicht gefunden. <a href="#sets">Zur Übersicht</a></p>'; }
   else m.innerHTML = vSets();
   document.documentElement.style.setProperty('--hh', $('header').offsetHeight + 'px');
@@ -219,11 +222,18 @@ function render() {
 const img = (u, cls = '') => u ? `<img src="${esc(u)}" alt="" loading="lazy" class="${cls}" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ph',textContent:'kein Bild'}))">` : '<div class="ph">kein Bild</div>';
 
 function vSets() {
-  let h = `<div class="row2"><input id="newset" inputmode="text" placeholder="Set-Nummer, z. B. 6086" autocomplete="off" ${busy ? 'disabled' : ''}><button class="pri" data-a="add" ${busy ? 'disabled' : ''}>Laden</button></div>${busy ? '' : '<div class="row2"><label class="btn" style="flex:1">Set-Liste importieren (CSV von Rebrickable)<input type="file" id="csvin" accept=".csv,text/csv,text/plain" hidden></label></div>'}`;
+  let list = Object.values(S.sets).sort((a, b) => (a.bagged - b.bagged) || String(b.added).localeCompare(String(a.added)));
+  const open = addOpen || !list.length || busy;
+  let h = '';
+  if (list.length) h += `<div class="row2"><input id="q" type="search" placeholder="Suchen: Teilenummer, Set oder Name" value="${esc(query)}" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+  <div class="row2"><button data-a="toggleadd">${open ? '× Hinzufügen schließen' : '+ Sets hinzufügen'}</button><a class="btn" href="#print">Etiketten drucken</a></div>`;
+  if (open) {
+    h += `<div class="addbox"><b>Neues Set laden</b><div class="row2"><input id="newset" inputmode="text" placeholder="Set-Nummer, z. B. 6086" autocomplete="off" ${busy ? 'disabled' : ''}><button class="pri" data-a="add" ${busy ? 'disabled' : ''}>Laden</button></div>`;
+    if (!busy) h += '<div class="row2"><label class="btn" style="flex:1">Set-Liste importieren (CSV von Rebrickable)<input type="file" id="csvin" accept=".csv,text/csv,text/plain" hidden></label></div>';
+    h += '<p class="mut" style="margin:0">Nur hier werden Sets angelegt. Teile suchst du oben im Suchfeld.</p></div>';
+  }
   if (busy) h += `<p class="prog"><b>${esc(busy)}</b> <span id="prog"></span></p>`;
   if (!S.settings.key) h += `<p class="mut">Zuerst in den <a href="#settings">Einstellungen</a> den Rebrickable-API-Schlüssel eintragen.</p>`;
-  let list = Object.values(S.sets).sort((a, b) => (a.bagged - b.bagged) || String(b.added).localeCompare(String(a.added)));
-  if (list.length) h += `<div class="row2"><input id="q" type="search" placeholder="Suchen: Set, Name oder Teilenummer" value="${esc(query)}" autocomplete="off" autocapitalize="off" spellcheck="false"></div>`;
   const q = norm(query), hits = {};
   if (q) list = list.filter(s => {
     if (norm(s.num + s.name).includes(q)) return true;
@@ -272,7 +282,8 @@ function vSet(s) {
   if (!shown) h += `<p class="empty">${hideDone ? 'Alles erledigt.' : 'Keine Teile.'}</p>`;
   const mc = missing(s).reduce((a, i) => a + i.qty - i.found, 0);
   if (mc) h += `<p style="margin-top:18px"><a href="#shop">${fmt(mc)} fehlende Teile auf der Einkaufsliste →</a></p>`;
-  h += `<div class="row2" style="margin-top:24px">${s.bagged ? '<button data-a="unbag">Doch nicht eingebeutelt</button>' : '<button class="pri" data-a="bag">Als eingebeutelt markieren</button>'}<button class="${armed === 'del' ? 'warn' : ''}" data-a="del">${armed === 'del' ? 'Wirklich löschen?' : 'Set löschen'}</button></div>`;
+  h += `<div class="row2" style="margin-top:24px"><a class="btn" href="#print/${encodeURIComponent(s.num)}">Etikett drucken</a></div>`;
+  h += `<div class="row2">${s.bagged ? '<button data-a="unbag">Doch nicht eingebeutelt</button>' : '<button class="pri" data-a="bag">Als eingebeutelt markieren</button>'}<button class="${armed === 'del' ? 'warn' : ''}" data-a="del">${armed === 'del' ? 'Wirklich löschen?' : 'Set löschen'}</button></div>`;
   return h;
 }
 
@@ -308,6 +319,32 @@ function vSettings() {
   <p class="mut">Dein Fortschritt liegt nur auf diesem Gerät. Ab und zu sichern schadet nicht.</p>
   <div class="row2"><button data-a="export">Sicherung teilen/kopieren</button><button data-a="importshow">Sicherung einspielen</button></div><div id="out"></div></details>
   <p class="mut" style="margin-top:20px">Version ${VERSION} · <span id="persist"></span></p>`;
+}
+
+function labelsFor(r) {
+  if (r.id) return [S.sets[r.id]].filter(Boolean);
+  let list = Object.values(S.sets).sort((a, b) => a.num.localeCompare(b.num, 'de', { numeric: true }));
+  return printNew ? list.filter(s => !s.printed) : list;
+}
+function vPrint(id) {
+  const r = route(), sets = labelsFor(r), size = S.settings.label || 'a5', per = size === 'a5' ? 2 : 4;
+  let h = `<div class="noprint"><a href="${r.id ? '#set/' + encodeURIComponent(r.id) : '#sets'}" class="mut" style="display:inline-block;min-height:44px;line-height:44px">← Zurück</a>
+  <h2>Etiketten drucken</h2>
+  <div class="row2"><select id="lsize" aria-label="Format"><option value="a5" ${size === 'a5' ? 'selected' : ''}>A5 – 2 pro A4-Blatt</option><option value="a6" ${size === 'a6' ? 'selected' : ''}>A6 – 4 pro A4-Blatt</option></select></div>`;
+  if (!r.id) h += `<div class="row2"><button data-a="pnew">${printNew ? 'Zeigt: nur noch nicht gedruckte' : 'Zeigt: alle Sets'} (umschalten)</button></div>`;
+  h += `<div class="row2"><button class="pri" data-a="print" ${sets.length ? '' : 'disabled'}>${sets.length} ${sets.length === 1 ? 'Etikett' : 'Etiketten'} drucken</button></div>
+  <p class="mut">Auf A4 drucken, an den gestrichelten Linien schneiden. Im Druckdialog „Ränder: keine“ bzw. Skalierung 100 % wählen.</p></div>`;
+  if (!sets.length) return h + '<p class="empty">Alle Sets haben schon ein Etikett. Oben auf „alle Sets“ umschalten, um sie erneut zu drucken.</p>';
+  for (let i = 0; i < sets.length; i += per) {
+    h += `<div class="sheet ${size}">` + sets.slice(i, i + per).map(s => {
+      const mc = missing(s).reduce((a, x) => a + x.qty - x.found, 0);
+      return `<div class="lbl">${s.img ? `<img src="${esc(s.img)}" alt="">` : '<div class="ph">kein Bild</div>'}
+      <div class="lnum">${esc(s.num.replace(/-1$/, ''))}</div><div class="lname">${esc(s.name)}</div>
+      <div class="lmeta">${s.year ? esc(s.year) + ' · ' : ''}${fmt(tot(s))} Teile${mc ? ` · fehlen: ${fmt(mc)}` : ''}</div>
+      <div class="lbag">Beutel ____ von ____</div></div>`;
+    }).join('') + '</div>';
+  }
+  return h;
 }
 
 /* ---------- Exporte ---------- */
@@ -354,6 +391,15 @@ document.addEventListener('click', async ev => {
   const el = ev.target.closest('[data-a]'); if (!el) return;
   const a = el.dataset.a, r = route();
   if (a !== 'del') armed = null;
+  if (a === 'toggleadd') { addOpen = !addOpen; render(); if (addOpen) { const i = $('#newset'); if (i) i.focus(); } return; }
+  if (a === 'pnew') { printNew = !printNew; render(); return; }
+  if (a === 'print') {
+    const sets = labelsFor(r);
+    for (const s of sets) s.printed = true;
+    save('sets');
+    try { window.print(); } catch (e) { toast('Drucken wird hier nicht unterstützt'); }
+    return;
+  }
   if (a === 'add') { const v = $('#newset').value.trim(); if (v) addSet(v); return; }
   if (a === 'hide') { hideDone = !hideDone; render(); return; }
   if (r.v === 'set') {
@@ -392,6 +438,7 @@ document.addEventListener('input', ev => {
   const i = $('#q'); if (i) { i.focus(); try { i.setSelectionRange(pos, pos); } catch (e) {} }
 });
 document.addEventListener('change', async ev => {
+  if (ev.target.id === 'lsize') { S.settings.label = ev.target.value; save('settings'); render(); return; }
   if (ev.target.id !== 'csvin' || !ev.target.files[0] || busy) return;
   const txt = await ev.target.files[0].text();
   importSets(txt);
