@@ -1,6 +1,6 @@
 'use strict';
 {
-const VERSION = '1.1';
+const VERSION = '1.2';
 const API = 'https://rebrickable.com/api/v3/lego';
 const DEFAULT_SHEET = '';
 const $ = s => document.querySelector(s);
@@ -159,8 +159,10 @@ async function addSet(raw, bulk) {
   render();
 }
 async function importSets(text) {
-  const nums = [...new Set((String(text).match(/\b\d{3,7}-\d{1,2}\b/g) || []).map(setNum))].filter(n => !S.sets[n]);
-  if (!nums.length) { toast('Keine neuen Set-Nummern gefunden'); return; }
+  const all = [...new Set((String(text).match(/\b\d{3,7}-\d{1,2}\b/g) || []).map(setNum))];
+  const nums = all.filter(n => !S.sets[n]), skipped = all.length - nums.length;
+  if (!all.length) { toast('Keine Set-Nummern in der Datei gefunden'); return; }
+  if (!nums.length) { toast(`Alle ${all.length} Sets sind schon vorhanden, nichts importiert`); return; }
   const failed = [];
   for (let i = 0; i < nums.length; i++) {
     try { await addSet(nums[i], `Set ${i + 1} von ${nums.length}`); }
@@ -168,7 +170,8 @@ async function importSets(text) {
     await sleep(1100);
   }
   busy = null; render();
-  toast(failed.length ? `Fertig, ${failed.length} nicht geladen: ${failed.slice(0, 3).join(', ')}` : `${nums.length} Sets geladen, offline bereit`);
+  const sk = skipped ? `, ${skipped} schon vorhanden (übersprungen)` : '';
+  toast(failed.length ? `Fertig, ${failed.length} nicht geladen: ${failed.slice(0, 3).join(', ')}${sk}` : `${nums.length} neue Sets geladen${sk}`);
 }
 async function cacheImages(set) {
   const urls = [set.img, ...set.items.map(i => i.img)].filter(Boolean);
@@ -204,6 +207,8 @@ function route() {
 function render() {
   const r = route();
   for (const t of ['sets', 'shop', 'settings']) $('#t-' + t).classList.toggle('on', (r.v === 'set' ? 'sets' : r.v) === t);
+  const n = Object.keys(S.sets).length;
+  $('#t-sets').textContent = n ? `Sets (${n})` : 'Sets';
   const m = $('#main');
   if (r.v === 'settings') m.innerHTML = vSettings();
   else if (r.v === 'shop') m.innerHTML = vShop();
