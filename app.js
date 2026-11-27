@@ -77,7 +77,7 @@ function parseCSV(t) {
 async function loadLocs() {
   const id = S.settings.sheetId.trim();
   if (!id) throw new Error('Bitte die ID der Google-Tabelle eintragen.');
-  const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('Kästchen')}`;
+  const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('Kästchen')}`;
   let res;
   try { res = await fetch(url, { cache: 'no-store' }); } catch (e) { throw new Error('Tabelle nicht erreichbar. Bist du online, und ist die Tabelle per Link lesbar?'); }
   if (!res.ok) throw new Error('Tabelle nicht lesbar (' + res.status + '). Freigabe „Jeder mit dem Link“ prüfen.');
