@@ -1,6 +1,6 @@
 'use strict';
 {
-const VERSION = '1.0';
+const VERSION = '1.1';
 const API = 'https://rebrickable.com/api/v3/lego';
 const DEFAULT_SHEET = '';
 const $ = s => document.querySelector(s);
@@ -121,10 +121,10 @@ async function apiAll(path) {
 }
 const setNum = s => { s = String(s).trim().toLowerCase(); return /-\d+$/.test(s) ? s : s + '-1'; };
 
-async function addSet(raw) {
+async function addSet(raw, bulk) {
   const num = setNum(raw);
-  if (S.sets[num]) { location.hash = '#set/' + encodeURIComponent(num); return; }
-  busy = 'Lade Set ' + num + ' …'; render();
+  if (S.sets[num]) { if (!bulk) location.hash = '#set/' + encodeURIComponent(num); return true; }
+  busy = (bulk ? bulk + ' · ' : '') + 'Lade Set ' + num + ' …'; render();
   try {
     const info = await api(`/sets/${encodeURIComponent(num)}/`);
     await sleep(1100);
@@ -149,13 +149,26 @@ async function addSet(raw) {
     for (const f of figs) m.set('fig|' + f.set_num, { id: 'fig|' + f.set_num, kind: 'fig', part: f.set_num, name: f.set_name, img: safeUrl(f.set_img_url), color: 'Minifigur', colorId: null, rgb: 'ffd500', bl: [], blColor: null, qty: f.quantity, found: 0, done: false });
     S.sets[num] = { num, name: info.name, year: info.year, img: safeUrl(info.set_img_url), items: [...m.values()], added: new Date().toISOString(), bagged: false };
     save('sets');
-    busy = 'Lade Bilder für offline …'; render();
+    busy = (bulk ? bulk + ' · ' : '') + 'Bilder für ' + info.name + ' …'; render();
     await cacheImages(S.sets[num]);
+    if (bulk) return true;
     busy = null;
     toast(`${info.name}: ${fmt(m.size)} Positionen, offline bereit`);
     location.hash = '#set/' + encodeURIComponent(num);
-  } catch (e) { busy = null; toast(e.message); }
+  } catch (e) { if (bulk) throw e; busy = null; toast(e.message); }
   render();
+}
+async function importSets(text) {
+  const nums = [...new Set((String(text).match(/\b\d{3,7}-\d{1,2}\b/g) || []).map(setNum))].filter(n => !S.sets[n]);
+  if (!nums.length) { toast('Keine neuen Set-Nummern gefunden'); return; }
+  const failed = [];
+  for (let i = 0; i < nums.length; i++) {
+    try { await addSet(nums[i], `Set ${i + 1} von ${nums.length}`); }
+    catch (e) { failed.push(nums[i] + ' (' + e.message + ')'); if (/Schlüssel|online/i.test(e.message)) break; }
+    await sleep(1100);
+  }
+  busy = null; render();
+  toast(failed.length ? `Fertig, ${failed.length} nicht geladen: ${failed.slice(0, 3).join(', ')}` : `${nums.length} Sets geladen, offline bereit`);
 }
 async function cacheImages(set) {
   const urls = [set.img, ...set.items.map(i => i.img)].filter(Boolean);
@@ -201,7 +214,7 @@ function render() {
 const img = (u, cls = '') => u ? `<img src="${esc(u)}" alt="" loading="lazy" class="${cls}" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ph',textContent:'kein Bild'}))">` : '<div class="ph">kein Bild</div>';
 
 function vSets() {
-  let h = `<div class="row2"><input id="newset" inputmode="text" placeholder="Set-Nummer, z. B. 6086" autocomplete="off" ${busy ? 'disabled' : ''}><button class="pri" data-a="add" ${busy ? 'disabled' : ''}>Laden</button></div>`;
+  let h = `<div class="row2"><input id="newset" inputmode="text" placeholder="Set-Nummer, z. B. 6086" autocomplete="off" ${busy ? 'disabled' : ''}><button class="pri" data-a="add" ${busy ? 'disabled' : ''}>Laden</button></div>${busy ? '' : '<div class="row2"><label class="btn" style="flex:1">Set-Liste importieren (CSV von Rebrickable)<input type="file" id="csvin" accept=".csv,text/csv,text/plain" hidden></label></div>'}`;
   if (busy) h += `<p class="prog"><b>${esc(busy)}</b> <span id="prog"></span></p>`;
   if (!S.settings.key) h += `<p class="mut">Zuerst in den <a href="#settings">Einstellungen</a> den Rebrickable-API-Schlüssel eintragen.</p>`;
   const list = Object.values(S.sets).sort((a, b) => (a.bagged - b.bagged) || String(b.added).localeCompare(String(a.added)));
@@ -357,6 +370,11 @@ document.addEventListener('click', async ev => {
     catch (e) { toast('Das ist keine gültige Sicherung'); }
     return;
   }
+});
+document.addEventListener('change', async ev => {
+  if (ev.target.id !== 'csvin' || !ev.target.files[0] || busy) return;
+  const txt = await ev.target.files[0].text();
+  importSets(txt);
 });
 document.addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.target.id === 'newset') { ev.preventDefault(); const v = ev.target.value.trim(); if (v && !busy) addSet(v); } });
 addEventListener('hashchange', () => { armed = null; render(); scrollTo(0, 0); });
