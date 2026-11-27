@@ -1,6 +1,6 @@
 'use strict';
 {
-const VERSION = '1.2';
+const VERSION = '1.3';
 const API = 'https://rebrickable.com/api/v3/lego';
 const DEFAULT_SHEET = '';
 const $ = s => document.querySelector(s);
@@ -35,7 +35,7 @@ const S = { settings: { key: '', sheetId: DEFAULT_SHEET }, locs: { map: {}, labe
 const saveT = {};
 function save(k) { clearTimeout(saveT[k]); saveT[k] = setTimeout(() => idb.set(k, S[k]).catch(() => toast('Speichern fehlgeschlagen')), 250); }
 
-let hideDone = true, busy = null, armed = null;
+let hideDone = true, busy = null, armed = null, query = '';
 const toast = t => { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(e._t); e._t = setTimeout(() => e.classList.remove('on'), 2600); };
 
 /* ---------- Teilenummern & Standorte ---------- */
@@ -222,11 +222,20 @@ function vSets() {
   let h = `<div class="row2"><input id="newset" inputmode="text" placeholder="Set-Nummer, z. B. 6086" autocomplete="off" ${busy ? 'disabled' : ''}><button class="pri" data-a="add" ${busy ? 'disabled' : ''}>Laden</button></div>${busy ? '' : '<div class="row2"><label class="btn" style="flex:1">Set-Liste importieren (CSV von Rebrickable)<input type="file" id="csvin" accept=".csv,text/csv,text/plain" hidden></label></div>'}`;
   if (busy) h += `<p class="prog"><b>${esc(busy)}</b> <span id="prog"></span></p>`;
   if (!S.settings.key) h += `<p class="mut">Zuerst in den <a href="#settings">Einstellungen</a> den Rebrickable-API-Schlüssel eintragen.</p>`;
-  const list = Object.values(S.sets).sort((a, b) => (a.bagged - b.bagged) || String(b.added).localeCompare(String(a.added)));
+  let list = Object.values(S.sets).sort((a, b) => (a.bagged - b.bagged) || String(b.added).localeCompare(String(a.added)));
+  if (list.length) h += `<div class="row2"><input id="q" type="search" placeholder="Suchen: Set, Name oder Teilenummer" value="${esc(query)}" autocomplete="off" autocapitalize="off" spellcheck="false"></div>`;
+  const q = norm(query), hits = {};
+  if (q) list = list.filter(s => {
+    if (norm(s.num + s.name).includes(q)) return true;
+    const its = s.items.filter(it => keysFor(it).includes(q) || norm(it.part).startsWith(q));
+    if (its.length) { hits[s.num] = its; return true; }
+    return false;
+  });
+  if (q && !list.length) return h + '<p class="empty">Kein Set enthält das gesuchte Teil.</p>';
   if (!list.length) return h + '<p class="empty">Noch keine Sets. Gib oben eine Set-Nummer ein, solange du Internet hast. Teileliste und Bilder werden dann fürs Arbeiten im Keller gespeichert.</p>';
   return h + list.map(s => {
     const t = tot(s), g = fnd(s), st = status(s), mc = missing(s).reduce((a, i) => a + i.qty - i.found, 0);
-    return `<a class="card" href="#set/${encodeURIComponent(s.num)}">${img(s.img)}<div><div class="mut">${esc(s.num)}<span class="chip ${st === 'komplett' || st === 'eingebeutelt' ? 'ok' : ''}">${esc(st)}</span></div><b>${esc(s.name)}</b><div class="bar"><i style="width:${t ? Math.round(g / t * 100) : 0}%"></i></div><div class="mut">${fmt(g)} / ${fmt(t)} Teile${mc ? ` · <span class="miss">${fmt(mc)} fehlen</span>` : ''}</div></div></a>`;
+    return `<a class="card" href="#set/${encodeURIComponent(s.num)}">${img(s.img)}<div><div class="mut">${esc(s.num)}<span class="chip ${st === 'komplett' || st === 'eingebeutelt' ? 'ok' : ''}">${esc(st)}</span></div><b>${esc(s.name)}</b><div class="bar"><i style="width:${t ? Math.round(g / t * 100) : 0}%"></i></div><div class="mut">${fmt(g)} / ${fmt(t)} Teile${mc ? ` · <span class="miss">${fmt(mc)} fehlen</span>` : ''}</div>${hits[s.num] ? hits[s.num].map(it => { const L = locate(it); return `<div class="nm">→ ${it.qty}× ${esc(it.part)} ${CN[it.color] || esc(it.color)} · ${L.boxes.length ? 'Kästchen ' + L.boxes.map(esc).join(', ') : 'kein Standort'}</div>`; }).join('') : ''}</div></a>`;
   }).join('');
 }
 
@@ -375,6 +384,12 @@ document.addEventListener('click', async ev => {
     catch (e) { toast('Das ist keine gültige Sicherung'); }
     return;
   }
+});
+document.addEventListener('input', ev => {
+  if (ev.target.id !== 'q') return;
+  query = ev.target.value;
+  const pos = ev.target.selectionStart; render();
+  const i = $('#q'); if (i) { i.focus(); try { i.setSelectionRange(pos, pos); } catch (e) {} }
 });
 document.addEventListener('change', async ev => {
   if (ev.target.id !== 'csvin' || !ev.target.files[0] || busy) return;
