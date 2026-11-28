@@ -1,5 +1,5 @@
-const V = 'v13';
-const SHELL = ['./', 'index.html', 'app.js?v=3.0', 'scan.js?v=3.0', 'backup.js?v=3.0', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
+const V = 'v14';
+const SHELL = ['./', 'index.html', 'app.js?v=3.1', 'scan.js?v=3.1', 'backup.js?v=3.1', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open('shell-' + V).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k.startsWith('shell-') && k !== 'shell-' + V).map(k => caches.delete(k)))).then(() => self.clients.claim()));

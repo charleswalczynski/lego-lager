@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '3.0';
+const VERSION = '3.1';
 const API = 'https://rebrickable.com/api/v3/lego';
 const DEFAULT_SHEET = '';
 const $ = s => document.querySelector(s);

@@ -6,7 +6,7 @@
 const STEPS = [['aufgenommen', 'Aufgenommen'], ['erkannt', 'Erkannt'], ['bestaetigt', 'Bestätigt'], ['gespeichert', 'Gespeichert']];
 const STEP_I = Object.fromEntries(STEPS.map((s, i) => [s[0], i]));
 const MAXBOX = 699;
-let draft = null, draftBox = '', scanArmed = null, cands = {}, recBusy = null, saveBusy = null;
+let showSaved = false, draft = null, draftBox = '', scanArmed = null, cands = {}, recBusy = null, saveBusy = null;
 const phURL = {};
 const tm = d => new Date(d).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -132,11 +132,13 @@ function vScan() {
       <div id="sboxinfo">${boxInfo(bc)}</div>`;
   if (all.length) h += `<div class="stat">${STEPS.map(([k, l]) => cnt[k] ? `<span><b>${cnt[k]}</b> ${l.toLowerCase()}</span>` : '').join('')}${nErr ? `<span class="miss"><b>${nErr}</b> mit Fehler</span>` : ''}</div>`;
   else h += '<p class="empty">Nummer eintippen, dann ein Teil aus dem Kästchen fotografieren. Erkennen und Speichern geht später mit Internet.</p>';
-  for (const it of all) {
+  const list = showSaved ? all : all.filter(i => i.status !== 'gespeichert');
+  if (all.length && !list.length) h += '<p class="empty">Alles gespeichert.</p>';
+  for (const it of list) {
     h += `<a class="card" href="#scan/${esc(it.id)}"><img class="thumb" data-ph="${esc(it.id)}" alt=""><div><div class="l1"><b style="flex:none">Kästchen ${esc(it.box)}</b> ${chip(it)}</div>
       <div class="nm ${it.err ? 'miss' : 'mut'}">${it.err ? esc(it.err.msg) : it.parts ? esc(it.parts) + (it.name ? ' · ' + esc(it.name) : '') : 'noch keine Teilenummer'}</div></div></a>`;
   }
-  if (all.length) h += `<div class="row2" style="margin-top:16px">${nSaved ? `<button data-a="s-clean">${nSaved} gespeicherte entfernen</button>` : ''}<button data-a="s-log">Protokoll teilen</button></div>`;
+  if (all.length) h += `<div class="row2" style="margin-top:16px">${nSaved ? `<button data-a="s-showsaved">${showSaved ? 'Gespeicherte ausblenden' : `${nSaved} gespeicherte zeigen`}</button>` : ''}<button data-a="s-log">Protokoll teilen</button></div>${nSaved && showSaved ? '<div class="row2"><button data-a="s-clean">Gespeicherte vom iPhone entfernen</button></div>' : ''}`;
   return h;
 }
 function boxInfo(c) {
@@ -165,7 +167,7 @@ function vScanItem(it) {
     bar = `<button data-a="s-edit">Ändern</button><button class="pri" data-a="s-save" ${saveBusy ? 'disabled' : ''}>${saveBusy === it.id ? 'Speichere …' : 'In Tabelle speichern'}</button>`;
   } else {
     h += `<button class="wide" data-a="s-rec" ${recBusy ? 'disabled' : ''}>${recBusy === it.id ? 'Erkenne …' : (it.cands ? 'Nochmal erkennen' : 'Erkennen')}</button>`;
-    if (it.cands) h += it.cands.length ? it.cands.map((c, i) => `<button class="cand${splitParts(it.parts)[0] === norm(c.id) ? ' sel' : ''}" data-a="s-pick" data-i="${i}">${img(c.img)}<span><b>${esc(c.id)}</b> <span class="mut">${Math.round(c.score * 100)} %</span><br><span class="nm">${esc(c.name)}</span></span></button>`).join('')
+    if (it.cands) h += it.cands.length ? '<div class="cands">' + it.cands.map((c, i) => `<button class="cand${splitParts(it.parts)[0] === norm(c.id) ? ' sel' : ''}" data-a="s-pick" data-i="${i}" aria-label="${esc(c.id)} ${esc(c.name)} übernehmen">${img(c.img)}<span><b>${esc(c.id)}</b> <span class="mut">${Math.round(c.score * 100)} %</span></span><span class="nm">${esc(c.name)}</span></button>`).join('') + '</div>'
       : '<p class="mut">Keine Vorschläge – Nummer bitte selbst eintragen.</p>';
     h += `<label for="dparts">Teilenummer</label><input id="dparts" value="${esc(it.parts)}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="mehrere mit Komma">
       <label for="dname">Bezeichnung</label><input id="dname" value="${esc(it.name)}" autocomplete="off">
@@ -197,9 +199,9 @@ async function saveItem(it, force) {
   if (!navigator.onLine) { toast('Speichern geht nur mit Internet'); return; }
   const c = boxCheck(it.box, it.id);
   const expect = force ? it.err.current.parts : (it.expect ?? (c.cur ? c.cur.parts : ''));
-  const ok = await ask(`<h3>In Tabelle speichern?</h3><p><b>Kästchen ${esc(it.box)}</b></p>
-    <p>Vorher: ${expect ? esc(expect) : 'leer'}<br>Nachher: <b>${esc(it.parts)}</b>${it.name ? ' – ' + esc(it.name) : ''}${it.note ? '<br>Notiz: ' + esc(it.note) : ''}</p>
-    <p class="mut">Das Foto wird als ${esc(it.box)}.jpg im Drive-Ordner „Lego-Lager Fotos“ abgelegt.</p>`, force ? 'Überschreiben' : 'Jetzt speichern', force ? 'warn' : 'pri');
+  const issues = [...c.w, ...partCheck(it, it.parts)];
+  let ok = true;
+  if (force || issues.length || expect) ok = await ask(`<h3>${force ? 'Überschreiben?' : 'Trotzdem speichern?'}</h3><p><b>Kästchen ${esc(it.box)}</b><br>Vorher: ${expect ? esc(expect) : 'leer'}<br>Nachher: <b>${esc(it.parts)}</b>${it.name ? ' – ' + esc(it.name) : ''}</p>${warnHTML(issues)}`, force ? 'Überschreiben' : 'Speichern', force || expect ? 'warn' : 'pri');
   if (!ok) { logIt(it, 'Speichern abgebrochen'); return; }
   saveBusy = it.id; render();
   logIt(it, `Speichern gestartet (erwartet vorher: ${expect || 'leer'})`);
@@ -246,6 +248,7 @@ document.addEventListener('click', async ev => {
     save('scan'); render(); toast(`Kästchen ${it.box} übernommen`);
     return;
   }
+  if (a === 's-showsaved') { showSaved = !showSaved; render(); return; }
   if (a === 's-log') {
     const t = items().map(it => `Kästchen ${it.box} · ${STEPS[STEP_I[it.status]][1]}${it.err ? ' · FEHLER' : ''} · ${it.id}\n` + it.log.map(([t, m]) => `  ${tm(t)}  ${m}`).join('\n')).join('\n\n');
     return shareOut(t, 'Lego-Lager Protokoll');
