@@ -5,7 +5,7 @@
    ========================================================= */
 const STEPS = [['aufgenommen', 'Aufgenommen'], ['erkannt', 'Erkannt'], ['bestaetigt', 'Bestätigt'], ['gespeichert', 'Gespeichert']];
 const STEP_I = Object.fromEntries(STEPS.map((s, i) => [s[0], i]));
-const MAXBOX = 500;
+const MAXBOX = 699;
 let draft = null, draftBox = '', scanArmed = null, cands = {}, recBusy = null, saveBusy = null;
 const phURL = {};
 const tm = d => new Date(d).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
