@@ -1,6 +1,5 @@
 'use strict';
-{
-const VERSION = '2.0';
+const VERSION = '2.0.1';
 const API = 'https://rebrickable.com/api/v3/lego';
 const DEFAULT_SHEET = '';
 const $ = s => document.querySelector(s);
@@ -490,4 +489,3 @@ addEventListener('online', net); addEventListener('offline', net);
     loadLocs().then(() => render()).catch(() => {});
   }
 })();
-}
