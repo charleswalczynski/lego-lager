@@ -102,8 +102,8 @@ document.addEventListener('click', async ev => {
     o.innerHTML = '<p class="mut">Sichere aktuellen Stand …</p>';
     try { if (Object.keys(S.sets).length) await doBackup('vor-Wiederherstellung', true); }
     catch (e) { o.innerHTML = `<div class="errbox">Aktueller Stand konnte nicht gesichert werden (${esc(e.message)}). Wiederherstellung abgebrochen – nichts geändert.</div>`; return; }
-    S.sets = j.sets; S.damaged = 0; save('sets');
+    S.sets = j.sets; S.damaged = 0; assignBags(); save('sets');
     S.meta.changes = 0; S.meta.lastBackup = { at: j.at, name: r.name, restored: new Date().toISOString(), ...then }; save('meta');
-    toast('Wiederhergestellt: ' + r.name); location.hash = '#sets'; render();
+    toast('Wiederhergestellt – jetzt noch „Bilder offline laden“'); render();
   }
 });

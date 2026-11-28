@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '2.1';
+const VERSION = '2.2';
 const API = 'https://rebrickable.com/api/v3/lego';
 const DEFAULT_SHEET = '';
 const $ = s => document.querySelector(s);
@@ -350,6 +350,7 @@ function vSettings() {
   <p class="mut">Dein Fortschritt liegt auf diesem Gerät. Sichere ihn regelmäßig nach Google Drive – jede Sicherung ist eine eigene Datei.</p>
   <p>${S.meta.lastBackup ? `Zuletzt gesichert: ${esc(tm(S.meta.lastBackup.at))} · ${fmt(S.meta.lastBackup.sets)} Sets, ${fmt(S.meta.lastBackup.found)} Teile` : 'Noch nie nach Drive gesichert.'}${S.meta.changes ? ` · <b>${fmt(S.meta.changes)} Änderungen offen</b>` : ''}</p>
   <div class="row2"><button class="pri" data-a="b-save">Jetzt nach Drive sichern</button><button data-a="b-list">Aus Drive wiederherstellen …</button></div><div id="bout"></div>
+  <div class="row2"><button data-a="imgs">Bilder aller Sets offline laden</button></div><p class="mut" id="imgprog">Nach dem Übertragen von einem anderen Gerät einmal mit WLAN ausführen, sonst fehlen im Keller die Bilder.</p>
   <p class="mut">Zusätzlich als Text (z. B. für ein anderes Gerät):</p>
   <div class="row2"><button data-a="export">Sicherung teilen/kopieren</button><button data-a="importshow">Sicherung einspielen</button></div><div id="out"></div></details>
   <p class="mut" style="margin-top:20px">Version ${VERSION} · <span id="persist"></span></p>`;
@@ -475,10 +476,20 @@ document.addEventListener('click', async ev => {
     try { const n = await loadLocs(); toast(fmt(n) + ' Teilenummern geladen'); } catch (e) { toast(e.message); }
     render(); return;
   }
+  if (a === 'imgs') {
+    if (!navigator.onLine) { toast('Geht nur mit Internet'); return; }
+    const list = Object.values(S.sets), urls = [...new Set(list.flatMap(s => [s.img, ...s.items.map(i => i.img)]).filter(Boolean))];
+    el.disabled = true; let n = 0, fail = 0; const p = $('#imgprog');
+    const work = async () => { while (urls.length) { const u = urls.shift(); try { await fetch(u, { mode: 'no-cors' }); } catch (e) { fail++; } n++; if (p && n % 20 === 0) p.textContent = `${fmt(n)} Bilder geladen …`; } };
+    const total = urls.length;
+    await Promise.all([work(), work(), work(), work(), work(), work()]);
+    if (p) p.textContent = `Fertig: ${fmt(total - fail)} von ${fmt(total)} Bildern offline verfügbar${fail ? ` – ${fmt(fail)} fehlgeschlagen, bitte nochmal tippen` : ''}.`;
+    el.disabled = false; return;
+  }
   if (a === 'export') return shareOut(JSON.stringify({ app: 'lego-lager', v: 1, at: new Date().toISOString(), settings: { sheetId: S.settings.sheetId }, sets: S.sets, scan: S.scan }), 'Lego-Lager Sicherung');
   if (a === 'importshow') { $('#out').innerHTML = '<textarea id="imp" placeholder="Sicherung hier einfügen"></textarea><div class="row2"><button class="pri" data-a="import">Einspielen</button></div>'; return; }
   if (a === 'import') {
-    try { const j = JSON.parse($('#imp').value); if (j.app !== 'lego-lager' || !j.sets) throw 0; S.sets = j.sets; save('sets'); toast('Sicherung eingespielt'); location.hash = '#sets'; }
+    try { const j = JSON.parse($('#imp').value); if (j.app !== 'lego-lager' || !j.sets) throw 0; S.sets = j.sets; assignBags(); save('sets'); toast('Sicherung eingespielt – jetzt noch „Bilder offline laden“'); render(); }
     catch (e) { toast('Das ist keine gültige Sicherung'); }
     return;
   }
