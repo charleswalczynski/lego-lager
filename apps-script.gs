@@ -10,7 +10,8 @@ const TOKEN = '__TOKEN__';
 const SHEET = 'Kästchen';
 const LOG_SHEET = 'Protokoll';
 const PHOTO_FOLDER = 'Lego-Lager Fotos';
-const SCRIPT_VERSION = 1;
+const BACKUP_FOLDER = 'Lego-Lager Sicherungen';
+const SCRIPT_VERSION = 2;
 
 function doGet(e) { return handle_(e && e.parameter ? e.parameter : {}); }
 function doPost(e) {
@@ -38,6 +39,9 @@ function handle_(p) {
       return out_({ ok: true, version: SCRIPT_VERSION, rows: data.slice(1) });
     }
     if (p.action === 'write') return write_(ss, sh, data, p);
+    if (p.action === 'backup') return backup_(ss, p);
+    if (p.action === 'backups') return listBackups_();
+    if (p.action === 'restore') return restore_(p);
     return out_({ ok: false, step: 'anfrage', error: 'Unbekannte Aktion: ' + p.action });
   } catch (err) {
     return out_({ ok: false, step: 'skript', error: String(err && err.message || err) });
@@ -113,6 +117,41 @@ function log_(ss, row) {
     lg.setFrozenRows(1);
   }
   lg.getRange(lg.getLastRow() + 1, 1, 1, row.length).setNumberFormat('@').setValues([row.map((v, i) => i === 0 ? Utilities.formatDate(v, 'Europe/Berlin', 'yyyy-MM-dd HH:mm:ss') : String(v))]);
+}
+
+function folder_(prop, name) {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty(prop);
+  if (id) { try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) {} }
+  const f = DriveApp.createFolder(name); props.setProperty(prop, f.getId()); return f;
+}
+function sha_(str) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, str, Utilities.Charset.UTF_8)
+    .map(b => ('0' + (b & 255).toString(16)).slice(-2)).join('');
+}
+function backup_(ss, p) {
+  const data = String(p.data || '');
+  if (!data) return out_({ ok: false, step: 'pruefen', error: 'Keine Daten zum Sichern.' });
+  if (sha_(data) !== p.sha) return out_({ ok: false, step: 'uebertragung', error: 'Daten kamen beschädigt an (Prüfsumme falsch). Nichts gespeichert.' });
+  const name = 'Sicherung_' + Utilities.formatDate(new Date(), 'Europe/Berlin', 'yyyy-MM-dd_HH-mm-ss') + (p.label ? '_' + String(p.label).replace(/[^\w-]+/g, '') : '') + '.json';
+  const f = folder_('backupFolder', BACKUP_FOLDER).createFile(name, data, 'application/json');
+  const back = f.getBlob().getDataAsString('UTF-8');
+  const sha = sha_(back);
+  log_(ss, [new Date(), p.client || '', '', '', '', '', '', '', '', '', sha === p.sha ? 'Sicherung ok: ' + name : 'Sicherung ABWEICHUNG: ' + name, f.getUrl()]);
+  if (sha !== p.sha) return out_({ ok: false, step: 'gegenpruefung', error: 'Gespeicherte Sicherung weicht ab: ' + name });
+  return out_({ ok: true, id: f.getId(), name: name, size: back.length, sha: sha, url: f.getUrl() });
+}
+function listBackups_() {
+  const it = folder_('backupFolder', BACKUP_FOLDER).getFiles(), list = [];
+  while (it.hasNext()) { const f = it.next(); if (!f.isTrashed() && /\.json$/.test(f.getName())) list.push({ id: f.getId(), name: f.getName(), size: f.getSize(), date: f.getDateCreated().toISOString() }); }
+  list.sort((a, b) => b.date.localeCompare(a.date));
+  return out_({ ok: true, list: list.slice(0, 40) });
+}
+function restore_(p) {
+  let f;
+  try { f = DriveApp.getFileById(String(p.id || '')); } catch (e) { return out_({ ok: false, step: 'laden', error: 'Sicherung nicht gefunden.' }); }
+  const data = f.getBlob().getDataAsString('UTF-8');
+  return out_({ ok: true, name: f.getName(), data: data, sha: sha_(data) });
 }
 
 function out_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }

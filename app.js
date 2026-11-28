@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '2.0.1';
+const VERSION = '2.1';
 const API = 'https://rebrickable.com/api/v3/lego';
 const DEFAULT_SHEET = '';
 const $ = s => document.querySelector(s);
@@ -30,9 +30,11 @@ const idb = (() => {
   return { get: k => tx('readonly', s => s.get(k)), set: (k, v) => tx('readwrite', s => s.put(v, k)), del: k => tx('readwrite', s => s.delete(k)) };
 })();
 
-const S = { settings: { key: '', sheetId: DEFAULT_SHEET, scriptUrl: '', token: '' }, locs: { map: {}, labels: {}, boxes: {}, rows: 0, updated: null }, sets: {}, blColors: null, scan: { items: {}, last: 0 } };
+const S = { settings: { key: '', sheetId: DEFAULT_SHEET, scriptUrl: '', token: '' }, locs: { map: {}, labels: {}, boxes: {}, rows: 0, updated: null }, sets: {}, blColors: null, scan: { items: {}, last: 0 }, meta: { changes: 0, changedAt: null, lastBackup: null } };
 const saveT = {};
-function save(k) { clearTimeout(saveT[k]); saveT[k] = setTimeout(() => idb.set(k, S[k]).catch(() => toast('Speichern fehlgeschlagen')), 250); }
+function save(k) {
+  if (k === 'sets') { S.meta.changes = (S.meta.changes || 0) + 1; S.meta.changedAt = new Date().toISOString(); save('meta'); }
+  clearTimeout(saveT[k]); saveT[k] = setTimeout(() => idb.set(k, S[k]).catch(() => toast('Speichern fehlgeschlagen')), 250); }
 
 let hideDone = true, busy = null, armed = null, query = '', addOpen = false, printNew = true;
 const toast = t => { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(e._t); e._t = setTimeout(() => e.classList.remove('on'), 2600); };
@@ -126,6 +128,14 @@ async function apiAll(path) {
   while (next) { const j = await api(next); out = out.concat(j.results || []); next = j.next; if (next) await sleep(1100); }
   return out;
 }
+const bagNo = b => { const m = /^A(\d+)$/i.exec(String(b || '').trim()); return m ? +m[1] : 0; };
+const nextBag = () => 'A' + (Math.max(0, ...Object.values(S.sets).map(s => bagNo(s.bag))) + 1);
+function assignBags() {
+  let n = 0;
+  for (const s of Object.values(S.sets).sort((a, b) => String(a.added).localeCompare(String(b.added)) || a.num.localeCompare(b.num))) if (!bagNo(s.bag)) { s.bag = nextBag(); n++; }
+  if (n) save('sets');
+  return n;
+}
 const setNum = s => { s = String(s).trim().toLowerCase(); return /-\d+$/.test(s) ? s : s + '-1'; };
 
 async function addSet(raw, bulk) {
@@ -154,7 +164,7 @@ async function addSet(raw, bulk) {
       });
     }
     for (const f of figs) m.set('fig|' + f.set_num, { id: 'fig|' + f.set_num, kind: 'fig', part: f.set_num, name: f.set_name, img: safeUrl(f.set_img_url), color: 'Minifigur', colorId: null, rgb: 'ffd500', bl: [], blColor: null, qty: f.quantity, found: 0, done: false });
-    S.sets[num] = { num, name: info.name, year: info.year, img: safeUrl(info.set_img_url), items: [...m.values()], added: new Date().toISOString(), bagged: false };
+    S.sets[num] = { num, name: info.name, year: info.year, img: safeUrl(info.set_img_url), items: [...m.values()], added: new Date().toISOString(), bagged: false, bag: nextBag() };
     save('sets');
     busy = (bulk ? bulk + ' · ' : '') + 'Bilder für ' + info.name + ' …'; render();
     await cacheImages(S.sets[num]);
@@ -210,6 +220,7 @@ function route() {
   if (h.startsWith('set/')) return { v: 'set', id: h.slice(4) };
   if (h.startsWith('print/')) return { v: 'print', id: h.slice(6) };
   if (h.startsWith('scan/')) return { v: 'scanitem', id: h.slice(5) };
+  if (h.startsWith('box/')) return { v: 'box', id: h.slice(4) };
   if (h === 'scan') return { v: 'scan' };
   if (h === 'print') return { v: 'print' };
   if (h === 'shop' || h === 'settings') return { v: h };
@@ -217,7 +228,7 @@ function route() {
 }
 function render() {
   const r = route();
-  const tab = r.v === 'set' || r.v === 'print' ? 'sets' : r.v === 'scanitem' ? 'scan' : r.v;
+  const tab = r.v === 'set' || r.v === 'print' || r.v === 'box' ? 'sets' : r.v === 'scanitem' ? 'scan' : r.v;
   for (const t of ['sets', 'scan', 'shop', 'settings']) $('#t-' + t).classList.toggle('on', tab === t);
   const open = Object.values(S.scan.items).filter(i => i.status !== 'gespeichert').length;
   $('#t-scan').textContent = open ? `Erfassen (${open})` : 'Erfassen';
@@ -228,6 +239,7 @@ function render() {
   else if (r.v === 'scan') m.innerHTML = vScan();
   else if (r.v === 'scanitem') { const it = S.scan.items[r.id]; m.innerHTML = it ? vScanItem(it) : '<p class="empty">Eintrag nicht gefunden. <a href="#scan">Zurück</a></p>'; }
   else if (r.v === 'shop') m.innerHTML = vShop();
+  else if (r.v === 'box') m.innerHTML = vBox(r.id);
   else if (r.v === 'print') m.innerHTML = vPrint(r.id);
   else if (r.v === 'set') { const s = S.sets[r.id]; m.innerHTML = s ? vSet(s) : '<p class="empty">Set nicht gefunden. <a href="#sets">Zur Übersicht</a></p>'; }
   else m.innerHTML = vSets();
@@ -239,8 +251,9 @@ const img = (u, cls = '') => u ? `<img src="${esc(u)}" alt="" loading="lazy" cla
 function vSets() {
   let list = Object.values(S.sets).sort((a, b) => (a.bagged - b.bagged) || String(b.added).localeCompare(String(a.added)));
   const open = addOpen || !list.length || busy;
-  let h = '';
+  let h = backupBar();
   if (list.length) h += `<div class="row2"><input id="q" type="search" placeholder="Suchen: Teilenummer, Set oder Name" value="${esc(query)}" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+  <div class="row2"><input id="boxgo" inputmode="numeric" pattern="[0-9]*" placeholder="Kästchen-Nr." autocomplete="off" style="flex:0 1 150px"><button data-a="boxgo">Kästchen öffnen</button></div>
   <div class="row2"><button data-a="toggleadd">${open ? '× Hinzufügen schließen' : '+ Sets hinzufügen'}</button><a class="btn" href="#print">Etiketten drucken</a></div>`;
   if (open) {
     h += `<div class="addbox"><b>Neues Set laden</b><div class="row2"><input id="newset" inputmode="text" placeholder="Set-Nummer, z. B. 6086" autocomplete="off" ${busy ? 'disabled' : ''}><button class="pri" data-a="add" ${busy ? 'disabled' : ''}>Laden</button></div>`;
@@ -251,7 +264,7 @@ function vSets() {
   if (!S.settings.key) h += `<p class="mut">Zuerst in den <a href="#settings">Einstellungen</a> den Rebrickable-API-Schlüssel eintragen.</p>`;
   const q = norm(query), hits = {};
   if (q) list = list.filter(s => {
-    if (norm(s.num + s.name).includes(q)) return true;
+    if (norm(s.num + s.name).includes(q) || norm(s.bag) === q) return true;
     const its = s.items.filter(it => keysFor(it).includes(q) || norm(it.part).startsWith(q));
     if (its.length) { hits[s.num] = its; return true; }
     return false;
@@ -260,7 +273,7 @@ function vSets() {
   if (!list.length) return h + '<p class="empty">Noch keine Sets. Gib oben eine Set-Nummer ein, solange du Internet hast. Teileliste und Bilder werden dann fürs Arbeiten im Keller gespeichert.</p>';
   return h + list.map(s => {
     const t = tot(s), g = fnd(s), st = status(s), mc = missing(s).reduce((a, i) => a + i.qty - i.found, 0);
-    return `<a class="card" href="#set/${encodeURIComponent(s.num)}">${img(s.img)}<div><div class="mut">${esc(s.num)}<span class="chip ${st === 'komplett' || st === 'eingebeutelt' ? 'ok' : ''}">${esc(st)}</span></div><b>${esc(s.name)}</b><div class="bar"><i style="width:${t ? Math.round(g / t * 100) : 0}%"></i></div><div class="mut">${fmt(g)} / ${fmt(t)} Teile${mc ? ` · <span class="miss">${fmt(mc)} fehlen</span>` : ''}</div>${hits[s.num] ? hits[s.num].map(it => { const L = locate(it); return `<div class="nm">→ ${it.qty}× ${esc(it.part)} ${CN[it.color] || esc(it.color)} · ${L.boxes.length ? 'Kästchen ' + L.boxes.map(esc).join(', ') : 'kein Standort'}</div>`; }).join('') : ''}</div></a>`;
+    return `<a class="card" href="#set/${encodeURIComponent(s.num)}">${img(s.img)}<div><div class="mut"><span class="bagno">${esc(s.bag || '–')}</span> ${esc(s.num)}<span class="chip ${st === 'komplett' || st === 'eingebeutelt' ? 'ok' : ''}">${esc(st)}</span></div><b>${esc(s.name)}</b><div class="bar"><i style="width:${t ? Math.round(g / t * 100) : 0}%"></i></div><div class="mut">${fmt(g)} / ${fmt(t)} Teile${mc ? ` · <span class="miss">${fmt(mc)} fehlen</span>` : ''}</div>${hits[s.num] ? hits[s.num].map(it => { const L = locate(it); return `<div class="nm">→ ${it.qty}× ${esc(it.part)} ${CN[it.color] || esc(it.color)} · ${L.boxes.length ? 'Kästchen ' + L.boxes.map(esc).join(', ') : 'kein Standort'}</div>`; }).join('') : ''}</div></a>`;
   }).join('');
 }
 
@@ -275,7 +288,7 @@ function vSet(s) {
   });
   const keys = [...groups.keys()].sort((a, b) => a.startsWith('~') - b.startsWith('~') || boxSort(a, b));
   let h = `<a href="#sets" class="mut" style="display:inline-block;min-height:44px;line-height:44px">← Alle Sets</a>
-  <div class="mut">${esc(s.num)}${s.year ? ' · ' + esc(s.year) : ''}<span class="chip ${st === 'komplett' || st === 'eingebeutelt' ? 'ok' : ''}">${esc(st)}</span></div>
+  <div class="mut"><span class="bagno">${esc(s.bag || '–')}</span> ${esc(s.num)}${s.year ? ' · ' + esc(s.year) : ''}<span class="chip ${st === 'komplett' || st === 'eingebeutelt' ? 'ok' : ''}">${esc(st)}</span></div>
   <h2>${esc(s.name)}</h2><div class="bar"><i style="width:${t ? Math.round(g / t * 100) : 0}%"></i></div>
   <div class="mut">${fmt(g)} / ${fmt(t)} Teile · Tippe auf eine Zeile für +1 Stück</div>
   <div class="row2"><button data-a="hide">${hideDone ? 'Erledigte zeigen' : 'Erledigte ausblenden'}</button></div>`;
@@ -286,7 +299,7 @@ function vSet(s) {
     if (!rows.length) continue;
     shown += rows.length;
     const label = k === '~fig' ? 'Minifiguren' : k === '~none' ? 'Kein Standort erfasst' : (S.locs.labels[k] || '');
-    h += `<div class="gh"><span class="nr ${k === '~none' ? 'none' : ''}">${k === '~fig' ? '☺' : k === '~none' ? '?' : esc(k)}</span><b>${esc(label)}</b></div>`;
+    h += `<div class="gh">${k.startsWith('~') ? `<span class="nr ${k === '~none' ? 'none' : ''}">${k === '~fig' ? '☺' : '?'}</span>` : `<a class="nr" href="#box/${esc(k)}" title="Kästchen-Ansicht">${esc(k)}</a>`}<b>${esc(label)}</b></div>`;
     h += rows.map(({ it, i, L }) => {
       const extra = [];
       if (L.boxes.length > 1) extra.push('auch ' + L.boxes.slice(1).map(esc).join(', '));
@@ -297,7 +310,7 @@ function vSet(s) {
   if (!shown) h += `<p class="empty">${hideDone ? 'Alles erledigt.' : 'Keine Teile.'}</p>`;
   const mc = missing(s).reduce((a, i) => a + i.qty - i.found, 0);
   if (mc) h += `<p style="margin-top:18px"><a href="#shop">${fmt(mc)} fehlende Teile auf der Einkaufsliste →</a></p>`;
-  h += `<div class="row2" style="margin-top:24px"><a class="btn" href="#print/${encodeURIComponent(s.num)}">Etikett drucken</a></div>`;
+  h += `<div class="row2" style="margin-top:24px"><a class="btn" href="#print/${encodeURIComponent(s.num)}">Etikett drucken</a><input id="bagin" value="${esc(s.bag || '')}" autocapitalize="characters" autocomplete="off" style="flex:0 1 90px" aria-label="Beutelnummer"><button data-a="setbag">Beutel-Nr. ändern</button></div>`;
   h += `<div class="row2">${s.bagged ? '<button data-a="unbag">Doch nicht eingebeutelt</button>' : '<button class="pri" data-a="bag">Als eingebeutelt markieren</button>'}<button class="${armed === 'del' ? 'warn' : ''}" data-a="del">${armed === 'del' ? 'Wirklich löschen?' : 'Set löschen'}</button></div>`;
   return h;
 }
@@ -333,8 +346,11 @@ function vSettings() {
   <div class="row2"><button class="pri" data-a="savecfg">Speichern</button><button data-a="ping">Verbindung testen</button><button data-a="locs">Kästchen jetzt laden</button></div>
   <div id="pingout"></div>
   <p class="mut">${l.updated ? `Kästchen zuletzt geladen: ${esc(new Date(l.updated).toLocaleString('de-DE'))} (über ${esc(l.src || 'Link')}) · ${fmt(Object.values(l.boxes || {}).filter(b => b.parts).length)} Kästchen belegt · ${fmt(l.rows)} Teilenummern` : 'Kästchen noch nicht geladen.'} Lade sie neu, bevor du in den Keller gehst.</p>
-  <details><summary><b>Sicherung</b></summary>
-  <p class="mut">Dein Fortschritt liegt nur auf diesem Gerät. Ab und zu sichern schadet nicht.</p>
+  <details open><summary><b>Sicherung</b></summary>
+  <p class="mut">Dein Fortschritt liegt auf diesem Gerät. Sichere ihn regelmäßig nach Google Drive – jede Sicherung ist eine eigene Datei.</p>
+  <p>${S.meta.lastBackup ? `Zuletzt gesichert: ${esc(tm(S.meta.lastBackup.at))} · ${fmt(S.meta.lastBackup.sets)} Sets, ${fmt(S.meta.lastBackup.found)} Teile` : 'Noch nie nach Drive gesichert.'}${S.meta.changes ? ` · <b>${fmt(S.meta.changes)} Änderungen offen</b>` : ''}</p>
+  <div class="row2"><button class="pri" data-a="b-save">Jetzt nach Drive sichern</button><button data-a="b-list">Aus Drive wiederherstellen …</button></div><div id="bout"></div>
+  <p class="mut">Zusätzlich als Text (z. B. für ein anderes Gerät):</p>
   <div class="row2"><button data-a="export">Sicherung teilen/kopieren</button><button data-a="importshow">Sicherung einspielen</button></div><div id="out"></div></details>
   <p class="mut" style="margin-top:20px">Version ${VERSION} · <span id="persist"></span></p>`;
 }
@@ -357,7 +373,7 @@ function vPrint(id) {
     h += `<div class="sheet ${size}">` + sets.slice(i, i + per).map(s => {
       const mc = missing(s).reduce((a, x) => a + x.qty - x.found, 0);
       return `<div class="lbl">${s.img ? `<img src="${esc(s.img)}" alt="">` : '<div class="ph">kein Bild</div>'}
-      <div class="lnum">${esc(s.num.replace(/-1$/, ''))}</div><div class="lname">${esc(s.name)}</div>
+      <div class="lnum">${esc(s.bag || '')}</div><div class="lname">${esc(s.num.replace(/-1$/, ''))} · ${esc(s.name)}</div>
       <div class="lmeta">${s.year ? esc(s.year) + ' · ' : ''}${fmt(tot(s))} Teile${mc ? ` · fehlen: ${fmt(mc)}` : ''}</div>
       <div class="lbag">Beutel ____ von ____</div></div>`;
     }).join('') + '</div>';
@@ -420,8 +436,19 @@ document.addEventListener('click', async ev => {
   }
   if (a === 'add') { const v = $('#newset').value.trim(); if (v) addSet(v); return; }
   if (a === 'hide') { hideDone = !hideDone; render(); return; }
-  if (r.v === 'set') {
-    const s = S.sets[r.id]; if (!s) return;
+  if (a === 'boxgo') { const v = ($('#boxgo').value || '').trim(); if (/^\d+$/.test(v)) location.hash = '#box/' + (+v); else toast('Bitte eine Kästchennummer eingeben'); return; }
+  if (a === 'setbag' && r.v === 'set') {
+    const s = S.sets[r.id], v = ($('#bagin').value || '').trim().toUpperCase();
+    if (!bagNo(v)) { toast('Format: A und Zahl, z. B. A12'); return; }
+    if (v === s.bag) return;
+    const other = Object.values(S.sets).find(x => x !== s && x.bag === v);
+    if (other) { toast(`${v} hat schon ${other.num} ${other.name}`); return; }
+    if (!await ask(`<h3>Beutelnummer ändern?</h3><p>${esc(s.num)} ${esc(s.name)}<br>${esc(s.bag || '–')} → <b>${esc(v)}</b></p><p class="mut">Ist das Etikett schon gedruckt, danach neu drucken.</p>`, 'Ändern')) return;
+    s.bag = v; s.printed = false; save('sets'); render(); return;
+  }
+  if (r.v === 'set' || (r.v === 'box' && el.dataset.s)) {
+    const s = r.v === 'set' ? S.sets[r.id] : S.sets[el.dataset.s]; if (!s) return;
+    if (r.v === 'box' && !['inc', 'dec', 'done'].includes(a)) return;
     if (a === 'bag' || a === 'unbag') { s.bagged = a === 'bag'; save('sets'); render(); return; }
     if (a === 'del') { if (armed !== 'del') { armed = 'del'; render(); return; } delete S.sets[s.num]; armed = null; save('sets'); location.hash = '#sets'; toast('Set gelöscht'); return; }
     const it = s.items[+el.dataset.i]; if (!it) return;
@@ -478,8 +505,10 @@ addEventListener('online', net); addEventListener('offline', net);
 (async () => {
   net();
   try {
-    for (const k of ['settings', 'locs', 'sets', 'blColors', 'scan']) { const v = await idb.get(k); if (v) S[k] = k === 'settings' ? { ...S.settings, ...v } : v; }
+    for (const k of ['settings', 'locs', 'sets', 'blColors', 'scan', 'meta']) { const v = await idb.get(k); if (v) S[k] = k === 'settings' ? { ...S.settings, ...v } : v; }
   } catch (e) { toast('Gerätespeicher nicht verfügbar'); }
+  const bad = Object.values(S.sets || {}).filter(s => !s || !Array.isArray(s.items) || s.items.some(i => !i || typeof i.qty !== 'number' || typeof i.found !== 'number'));
+  if (bad.length) { S.damaged = bad.length; } else { const n = assignBags(); if (n) toast(n + ' Sets haben Beutelnummern bekommen'); }
   render();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   if (navigator.storage && navigator.storage.persist) {
