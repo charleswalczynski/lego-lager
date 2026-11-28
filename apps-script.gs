@@ -11,7 +11,7 @@ const SHEET = 'Kästchen';
 const LOG_SHEET = 'Protokoll';
 const PHOTO_FOLDER = 'Lego-Lager Fotos';
 const BACKUP_FOLDER = 'Lego-Lager Sicherungen';
-const SCRIPT_VERSION = 2;
+const SCRIPT_VERSION = 3;
 
 function doGet(e) { return handle_(e && e.parameter ? e.parameter : {}); }
 function doPost(e) {
@@ -139,8 +139,25 @@ function backup_(ss, p) {
   const sha = sha_(back);
   log_(ss, [new Date(), p.client || '', '', '', '', '', '', '', '', '', sha === p.sha ? 'Sicherung ok: ' + name : 'Sicherung ABWEICHUNG: ' + name, f.getUrl()]);
   if (sha !== p.sha) return out_({ ok: false, step: 'gegenpruefung', error: 'Gespeicherte Sicherung weicht ab: ' + name });
-  return out_({ ok: true, id: f.getId(), name: name, size: back.length, sha: sha, url: f.getUrl() });
+  let pruned = 0;
+  if (p.label === 'auto') { try { pruned = pruneAuto_(); } catch (e) {} }
+  return out_({ ok: true, id: f.getId(), name: name, size: back.length, sha: sha, url: f.getUrl(), pruned: pruned });
 }
+/** Automatische Sicherungen ausdünnen: die 30 neuesten bleiben, ältere eine pro Tag (90 Tage). Rest in den Papierkorb (30 Tage wiederherstellbar). Manuelle Sicherungen bleiben immer. */
+function pruneAuto_() {
+  const it = folder_('backupFolder', BACKUP_FOLDER).getFiles(), list = [];
+  while (it.hasNext()) { const f = it.next(); if (!f.isTrashed() && /_auto\.json$/.test(f.getName())) list.push(f); }
+  list.sort((a, b) => b.getDateCreated() - a.getDateCreated());
+  const days = {}, limit = Date.now() - 90 * 864e5; let n = 0;
+  list.forEach((f, i) => {
+    if (i < 30) return;
+    const d = Utilities.formatDate(f.getDateCreated(), 'Europe/Berlin', 'yyyy-MM-dd');
+    if (!days[d] && f.getDateCreated().getTime() > limit) { days[d] = 1; return; }
+    f.setTrashed(true); n++;
+  });
+  return n;
+}
+
 function listBackups_() {
   const it = folder_('backupFolder', BACKUP_FOLDER).getFiles(), list = [];
   while (it.hasNext()) { const f = it.next(); if (!f.isTrashed() && /\.json$/.test(f.getName())) list.push({ id: f.getId(), name: f.getName(), size: f.getSize(), date: f.getDateCreated().toISOString() }); }

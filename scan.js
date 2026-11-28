@@ -132,8 +132,13 @@ function vScan() {
       <div id="sboxinfo">${boxInfo(bc)}</div>`;
   if (all.length) h += `<div class="stat">${STEPS.map(([k, l]) => cnt[k] ? `<span><b>${cnt[k]}</b> ${l.toLowerCase()}</span>` : '').join('')}${nErr ? `<span class="miss"><b>${nErr}</b> mit Fehler</span>` : ''}</div>`;
   else h += '<p class="empty">Nummer eintippen, dann ein Teil aus dem Kästchen fotografieren. Erkennen und Speichern geht später mit Internet.</p>';
-  const list = showSaved ? all : all.filter(i => i.status !== 'gespeichert');
-  if (all.length && !list.length) h += '<p class="empty">Alles gespeichert.</p>';
+  const chk = all.filter(i => i.check && i.status !== 'gespeichert');
+  if (chk.length) {
+    h += `<h3 class="sec">Im Keller prüfen (${chk.length})</h3>` + chk.map(it => `<a class="card" href="#scan/${esc(it.id)}"><img class="thumb" data-ph="${esc(it.id)}" alt=""><div><div class="l1"><b style="flex:none">Kästchen ${esc(it.box)}</b> <span class="chip">${esc(it.parts || '?')}</span></div>${it.check.issues.map(x => `<div class="nm" style="white-space:normal;font-size:13px">⚠︎ ${esc(x)}</div>`).join('')}</div></a>`).join('');
+  }
+  const list = (showSaved ? all : all.filter(i => i.status !== 'gespeichert')).filter(i => !(i.check && i.status !== 'gespeichert'));
+  if (chk.length && list.length) h += '<h3 class="sec">Weitere</h3>';
+  if (all.length && !list.length && !chk.length) h += '<p class="empty">Alles gespeichert.</p>';
   for (const it of list) {
     h += `<a class="card" href="#scan/${esc(it.id)}"><img class="thumb" data-ph="${esc(it.id)}" alt=""><div><div class="l1"><b style="flex:none">Kästchen ${esc(it.box)}</b> ${chip(it)}</div>
       <div class="nm ${it.err ? 'miss' : 'mut'}">${it.err ? esc(it.err.msg) : it.parts ? esc(it.parts) + (it.name ? ' · ' + esc(it.name) : '') : 'noch keine Teilenummer'}</div></div></a>`;
@@ -152,6 +157,7 @@ function vScanItem(it) {
   let h = `<img class="big" data-ph="${esc(it.id)}" alt="Foto Kästchen ${esc(it.box)}">
     <div class="steps" aria-hidden="true">${STEPS.map((x, i) => `<i class="${i <= st ? 'on' : ''}"></i>`).join('')}</div>
     <div class="stepl">Schritt ${st + 1} von 4: ${esc(STEPS[st][1])}${it.err ? ' · <span class="miss">Fehler</span>' : ''}</div>`;
+  if (it.check && !saved) h += `<div class="warnbox"><b>Im Keller prüfen</b> (vorgemerkt ${esc(tm(it.check.at))})${it.check.issues.map(x => `<div>⚠︎ ${esc(x)}</div>`).join('')}<div class="row2" style="margin-bottom:0"><button data-a="s-checked" style="min-height:36px">Geprüft – Vermerk entfernen</button></div></div>`;
   if (it.err) h += `<div class="errbox"><b>${esc(it.err.msg)}</b>${it.err.hint ? `<br>${esc(it.err.hint)}` : ''}</div>`;
   let bar = '';
   if (saved) {
@@ -185,13 +191,19 @@ function vScanItem(it) {
 }
 
 /* ---------- Bestätigungsdialog ---------- */
-function ask(html, ok, cls = 'pri') {
+function ask(html, ok, cls = 'pri', mark) {
   return new Promise(res => {
     const d = document.createElement('div'); d.className = 'modal';
-    d.innerHTML = `<div class="mbox">${html}<div class="row2"><button class="${cls}" data-m="1">${esc(ok)}</button><button data-m="0">Abbrechen</button></div></div>`;
-    d.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b) return; e.stopPropagation(); d.remove(); res(b.dataset.m === '1'); });
+    d.innerHTML = `<div class="mbox">${html}${mark ? `<button class="wide" data-m="2">${esc(mark)}</button>` : ''}<div class="row2"><button class="${cls}" data-m="1">${esc(ok)}</button><button data-m="0">Abbrechen</button></div></div>`;
+    d.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b) return; e.stopPropagation(); d.remove(); res(b.dataset.m === '2' ? 'mark' : b.dataset.m === '1'); });
     document.body.appendChild(d);
   });
+}
+
+function markCheck(it, issues) {
+  it.check = { at: new Date().toISOString(), issues };
+  logIt(it, 'Im Keller prüfen: ' + issues.join(' | '));
+  save('scan'); render(); toast(`Kästchen ${it.box} zum Prüfen vorgemerkt`);
 }
 
 /* ---------- Speichern ---------- */
@@ -201,7 +213,8 @@ async function saveItem(it, force) {
   const expect = force ? it.err.current.parts : (it.expect ?? (c.cur ? c.cur.parts : ''));
   const issues = [...c.w, ...partCheck(it, it.parts)];
   let ok = true;
-  if (force || issues.length || expect) ok = await ask(`<h3>${force ? 'Überschreiben?' : 'Trotzdem speichern?'}</h3><p><b>Kästchen ${esc(it.box)}</b><br>Vorher: ${expect ? esc(expect) : 'leer'}<br>Nachher: <b>${esc(it.parts)}</b>${it.name ? ' – ' + esc(it.name) : ''}</p>${warnHTML(issues)}`, force ? 'Überschreiben' : 'Speichern', force || expect ? 'warn' : 'pri');
+  if (force || issues.length || expect) ok = await ask(`<h3>${force ? 'Überschreiben?' : 'Trotzdem speichern?'}</h3><p><b>Kästchen ${esc(it.box)}</b><br>Vorher: ${expect ? esc(expect) : 'leer'}<br>Nachher: <b>${esc(it.parts)}</b>${it.name ? ' – ' + esc(it.name) : ''}</p>${warnHTML(issues)}`, force ? 'Überschreiben' : 'Speichern', force || expect ? 'warn' : 'pri', issues.length ? 'Im Keller prüfen – vormerken' : null);
+  if (ok === 'mark') return markCheck(it, issues);
   if (!ok) { logIt(it, 'Speichern abgebrochen'); return; }
   saveBusy = it.id; render();
   logIt(it, `Speichern gestartet (erwartet vorher: ${expect || 'leer'})`);
@@ -209,7 +222,7 @@ async function saveItem(it, force) {
     const blob = await getPhoto(it.id);
     const r = await gs({ action: 'write', client: 'app:' + it.id, box: it.box, parts: it.parts, name: it.name, note: it.note, expect, photo: blob ? await b64(blob) : '' });
     if (r.written.parts !== it.parts || r.written.box !== it.box) throw Object.assign(new Error('Gegenprüfung: Tabelle enthält etwas anderes als gesendet'), { step: 'gegenpruefung' });
-    it.status = 'gespeichert'; it.err = null; it.expect = undefined;
+    it.status = 'gespeichert'; it.err = null; it.expect = undefined; it.check = null;
     it.saved = { row: r.row, at: new Date().toISOString(), already: !!r.already, photo: r.photo, previous: r.previous };
     logIt(it, `Gespeichert in Zeile ${r.row}${r.already ? ' (war schon so eingetragen)' : ''}; gegengeprüft: ${r.written.parts}${r.photo ? '; Foto ' + (r.photo.kept ? 'war schon vorhanden' : 'abgelegt') : ''}`);
     // lokale Kästchenliste nachziehen
@@ -267,6 +280,7 @@ document.addEventListener('click', async ev => {
     delete S.scan.items[it.id]; scanArmed = null; save('scan'); location.hash = '#scan'; toast('Eintrag gelöscht'); return;
   }
   if (a === 's-rec') return recognize(it);
+  if (a === 's-checked') { it.check = null; logIt(it, 'Prüf-Vermerk entfernt'); save('scan'); render(); return; }
   if (a === 's-pick') { const c = it.cands[+el.dataset.i]; if (!c) return; it.parts = c.id; it.name = c.name; logIt(it, `Vorschlag ausgewählt: ${c.id} (${Math.round(c.score * 100)} %)`); render(); return; }
   if (a === 's-renum') {
     const c = boxCheck($('#dbox').value.trim(), it.id);
@@ -284,7 +298,12 @@ document.addEventListener('click', async ev => {
     if (it.unsure && !/bitte prüfen/i.test(note)) note = note ? note + ' – bitte prüfen' : 'bitte prüfen';
     it.note = note;
     const w = partCheck(it, parts);
-    if (w.length && !await ask(`<h3>Trotzdem bestätigen?</h3>${warnHTML(w)}<p class="mut">Gleiches Teil in zwei Kästchen ist ok, wenn sie sich wirklich unterscheiden (Farbe, Variante). Sonst lieber zusammenlegen.</p>`, 'Bestätigen')) return;
+    if (w.length) {
+      const r = await ask(`<h3>Trotzdem bestätigen?</h3>${warnHTML(w)}<p class="mut" style="font-size:14px">Gleiches Teil in zwei Kästchen ist ok, wenn sie sich wirklich unterscheiden (Farbe, Variante).</p>`, 'Bestätigen', 'pri', 'Im Keller prüfen – vormerken');
+      if (r === 'mark') { save('scan'); return markCheck(it, w); }
+      if (!r) return;
+    }
+    it.check = null;
     it.status = 'bestaetigt'; it.err = null; it.confirmed = { at: new Date().toISOString() };
     logIt(it, `Bestätigt: ${it.parts}${it.name ? ' – ' + it.name : ''}${it.note ? ' (Notiz: ' + it.note + ')' : ''}`);
     for (const x of w) logIt(it, 'Hinweis bestätigt: ' + x);

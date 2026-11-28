@@ -68,12 +68,35 @@ async function sha256(str) {
 const summary = sets => { const v = Object.values(sets || {}); return { sets: v.length, found: v.reduce((a, s) => a + fnd(s), 0), total: v.reduce((a, s) => a + tot(s), 0), bagged: v.filter(s => s.bagged).length }; };
 const sumTxt = x => `${fmt(x.sets)} Sets · ${fmt(x.found)} von ${fmt(x.total)} Teilen gefunden · ${fmt(x.bagged)} eingebeutelt`;
 
+const autoOn = () => S.settings.autoBackup !== false && !!(S.settings.scriptUrl && S.settings.token);
 function backupBar() {
   const m = S.meta || {}, lb = m.lastBackup;
   if (S.damaged) return `<div class="errbox"><b>${S.damaged} Sets im Gerätespeicher sind beschädigt.</b> Nichts abhaken und unter <a href="#settings">Mehr</a> eine Sicherung wiederherstellen.</div>`;
   if (!Object.keys(S.sets).length || (!m.changes && lb)) return '';
-  return `<div class="warnbox" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:4px 4px 4px 12px"><span>${m.changes ? `<b>${fmt(m.changes)}</b> Änderungen nicht gesichert` : 'Noch nie gesichert'}</span><button class="pri" data-a="b-save" style="flex:0 0 auto;min-height:36px">Sichern</button></div>`;
+  const failed = m.lastAuto && !m.lastAuto.ok && autoOn();
+  if (autoOn() && !failed && lb && Date.now() - Date.parse(lb.at) < 24 * 3600e3) return '';
+  return `<div class="warnbox" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:4px 4px 4px 12px"><span>${failed ? 'Automatische Sicherung fehlgeschlagen' : m.changes ? `<b>${fmt(m.changes)}</b> Änderungen nicht gesichert` : 'Noch nie gesichert'}</span><button class="pri" data-a="b-save" style="flex:0 0 auto;min-height:36px">Sichern</button></div>`;
 }
+
+/* Automatische Sicherung: sobald online, Änderungen da sind und 2 Min. Ruhe war – höchstens alle 20 Min. */
+let autoBusy = false;
+async function autoBackup() {
+  const m = S.meta;
+  if (autoBusy || !autoOn() || !navigator.onLine || !m || !m.changes || S.damaged || document.visibilityState !== 'visible') return;
+  const now = Date.now();
+  if (m.lastBackup && now - Date.parse(m.lastBackup.at) < 20 * 60e3) return;
+  if (m.changedAt && now - Date.parse(m.changedAt) < 2 * 60e3) return;
+  autoBusy = true;
+  try { await doBackup('auto', true); m.lastAuto = { at: new Date().toISOString(), ok: true }; }
+  catch (e) { m.lastAuto = { at: new Date().toISOString(), ok: false, err: (e.step ? e.step + ': ' : '') + e.message }; }
+  save('meta'); autoBusy = false;
+  const r = route(), ae = document.activeElement;
+  if ((r.v === 'sets' || r.v === 'settings') && !(ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName))) render();
+}
+setInterval(autoBackup, 60e3);
+addEventListener('online', () => setTimeout(autoBackup, 3000));
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(autoBackup, 3000); });
+setTimeout(autoBackup, 8000);
 
 async function doBackup(label, silent) {
   const data = JSON.stringify({ app: 'lego-lager', v: 2, at: new Date().toISOString(), version: VERSION, settings: { sheetId: S.settings.sheetId, label: S.settings.label }, sets: S.sets });
@@ -84,7 +107,7 @@ async function doBackup(label, silent) {
   S.meta.changes = Math.max(0, (S.meta.changes || 0) - changes);
   S.meta.lastBackup = { at: new Date().toISOString(), name: r.name, url: r.url, size: r.size, sha, ...sm };
   save('meta');
-  if (!silent) toast('Gesichert: ' + r.name);
+  if (!silent) toast('Gesichert');
   return r;
 }
 

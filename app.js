@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '3.1';
+const VERSION = '3.2';
 const API = 'https://rebrickable.com/api/v3/lego';
 const DEFAULT_SHEET = '';
 const $ = s => document.querySelector(s);
@@ -350,7 +350,9 @@ function vSettings() {
   const l = S.locs, lb = S.meta.lastBackup, conf = S.settings.key && (S.settings.scriptUrl || S.settings.sheetId);
   return `<h3 class="sec" style="margin-top:6px">Sicherung</h3>
   <p style="margin:4px 0">${lb ? `Zuletzt ${esc(tm(lb.at))} · ${fmt(lb.sets)} Sets` : 'Noch nie gesichert'}${S.meta.changes ? ` · <span class="miss">${fmt(S.meta.changes)} Änderungen offen</span>` : ''}</p>
-  <div class="row2"><button class="pri" data-a="b-save">Nach Drive sichern</button><button data-a="b-list">Wiederherstellen …</button></div><div id="bout"></div>
+  <label class="chk" style="margin:8px 0"><input type="checkbox" id="autob" ${S.settings.autoBackup !== false ? 'checked' : ''}> Automatisch sichern, sobald online</label>
+  ${S.meta.lastAuto ? `<p class="${S.meta.lastAuto.ok ? 'mut' : 'miss'}" style="font-size:13px;margin:0">Letzte automatische Sicherung ${esc(tm(S.meta.lastAuto.at))}: ${S.meta.lastAuto.ok ? 'ok' : esc(S.meta.lastAuto.err || 'Fehler')}</p>` : ''}
+  <div class="row2"><button class="pri" data-a="b-save">Jetzt sichern</button><button data-a="b-list">Wiederherstellen …</button></div><div id="bout"></div>
   <h3 class="sec">Kästchenliste</h3>
   <p style="margin:4px 0">${l.updated ? `Stand ${esc(tm(l.updated))} · ${fmt(Object.values(l.boxes || {}).filter(b => b.parts).length)} Kästchen belegt` : 'Noch nicht geladen'}</p>
   <div class="row2"><button data-a="locs">Jetzt laden</button></div>
@@ -517,6 +519,7 @@ document.addEventListener('change', async ev => {
   const txt = await ev.target.files[0].text();
   importSets(txt);
 });
+document.addEventListener('change', ev => { if (ev.target.id === 'autob') { S.settings.autoBackup = ev.target.checked; save('settings'); toast(ev.target.checked ? 'Automatische Sicherung an' : 'Automatische Sicherung aus'); } });
 document.addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.target.id === 'boxgo') { ev.preventDefault(); const b = $('[data-a="boxgo"]'); if (b) b.click(); return; } if (ev.key === 'Enter' && ev.target.id === 'newset') { ev.preventDefault(); const v = ev.target.value.trim(); if (v && !busy) addSet(v); } });
 addEventListener('hashchange', () => { armed = null; render(); scrollTo(0, 0); });
 
