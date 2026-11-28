@@ -120,65 +120,65 @@ function vScan() {
   const all = items(), cnt = {}; for (const it of all) cnt[it.status] = (cnt[it.status] || 0) + 1;
   const nErr = all.filter(i => i.err).length, nSaved = cnt.gespeichert || 0;
   const bc = draftBox ? boxCheck(draftBox) : null;
-  let h = `<h2>Erfassen</h2><p class="mut">Pro Kästchen: Nummer eingeben, ein Teil fotografieren. Funktioniert offline – Erkennen und Speichern machst du später oben mit Internet.</p>`;
+  let h = '';
   if (draft) {
     const c = boxCheck(draft.box);
-    h += `<div class="addbox"><img class="big" src="${esc(draft.url)}" alt=""><div class="bignr">Kästchen ${esc(draft.box)}</div>
-      <p class="mut">Stimmt die Nummer? Ist das Teil gut zu erkennen?</p>${warnHTML(c.w)}
-      <div class="row2"><button class="pri" data-a="s-keep">${c.w.length ? 'Trotzdem übernehmen' : 'Übernehmen'}</button><button data-a="s-drop">Verwerfen</button></div></div>`;
-  } else {
-    h += `<div class="addbox"><label for="sbox" style="margin-top:0">Kästchen-Nr.</label>
-      <input id="sbox" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${esc(draftBox)}" placeholder="z. B. 58">
-      <div id="sboxinfo">${bc ? (bc.bad ? `<p class="miss">${esc(bc.bad)}</p>` : warnHTML(bc.w) || '<p class="mut">Kästchen ist in der Tabelle frei.</p>') : ''}</div>
-      <label class="btn pri wide" for="cam">📷 Foto aufnehmen</label><input type="file" id="cam" accept="image/*" capture="environment" hidden></div>`;
+    h += `<img class="big" src="${esc(draft.url)}" alt="Foto für Kästchen ${esc(draft.box)}"><div class="bignr">Kästchen ${esc(draft.box)}</div>
+      ${warnHTML(c.w)}<div class="actionbar"><button data-a="s-drop">Verwerfen</button><button class="pri" data-a="s-keep">${c.w.length ? 'Trotzdem übernehmen' : 'Übernehmen'}</button></div>`;
+    return h;
   }
-  h += `<div class="stat">${STEPS.map(([k, l]) => `<span><b>${cnt[k] || 0}</b> ${l}</span>`).join('')}${nErr ? `<span class="miss"><b>${nErr}</b> Fehler</span>` : ''}</div>`;
-  if (!all.length) h += '<p class="empty">Noch nichts erfasst.</p>';
+  h += `<div class="capture"><input id="sbox" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${esc(draftBox)}" placeholder="Nr." aria-label="Kästchennummer">
+      <label class="btn pri" for="cam" style="margin:0">Foto aufnehmen</label><input type="file" id="cam" accept="image/*" capture="environment" hidden></div>
+      <div id="sboxinfo">${boxInfo(bc)}</div>`;
+  if (all.length) h += `<div class="stat">${STEPS.map(([k, l]) => cnt[k] ? `<span><b>${cnt[k]}</b> ${l.toLowerCase()}</span>` : '').join('')}${nErr ? `<span class="miss"><b>${nErr}</b> mit Fehler</span>` : ''}</div>`;
+  else h += '<p class="empty">Nummer eintippen, dann ein Teil aus dem Kästchen fotografieren. Erkennen und Speichern geht später mit Internet.</p>';
   for (const it of all) {
-    h += `<a class="card" href="#scan/${esc(it.id)}"><img class="thumb" data-ph="${esc(it.id)}" alt=""><div><b>Kästchen ${esc(it.box)}</b> ${chip(it)}
-      <div class="nm">${it.parts ? esc(it.parts) + (it.name ? ' · ' + esc(it.name) : '') : '<span class="mut">noch keine Teilenummer</span>'}</div>
-      ${it.err ? `<div class="miss nm">${esc(it.err.msg)}</div>` : ''}<div class="mut">${esc(tm(it.created))}</div></div></a>`;
+    h += `<a class="card" href="#scan/${esc(it.id)}"><img class="thumb" data-ph="${esc(it.id)}" alt=""><div><div class="l1"><b style="flex:none">Kästchen ${esc(it.box)}</b> ${chip(it)}</div>
+      <div class="nm ${it.err ? 'miss' : 'mut'}">${it.err ? esc(it.err.msg) : it.parts ? esc(it.parts) + (it.name ? ' · ' + esc(it.name) : '') : 'noch keine Teilenummer'}</div></div></a>`;
   }
-  if (all.length) h += `<div class="row2"><button data-a="s-log">Protokoll teilen</button>${nSaved ? `<button data-a="s-clean">Gespeicherte entfernen (${nSaved})</button>` : ''}</div>`;
+  if (all.length) h += `<div class="row2" style="margin-top:16px">${nSaved ? `<button data-a="s-clean">${nSaved} gespeicherte entfernen</button>` : ''}<button data-a="s-log">Protokoll teilen</button></div>`;
   return h;
+}
+function boxInfo(c) {
+  if (!c) return '';
+  if (c.bad) return `<p class="miss" style="font-size:14px">${esc(c.bad)}</p>`;
+  return warnHTML(c.w) || `<p class="mut" style="font-size:14px;margin:6px 0">Kästchen ${esc(c.box)} ist frei.</p>`;
 }
 
 function vScanItem(it) {
   const st = STEP_I[it.status], saved = it.status === 'gespeichert';
-  let h = `<p><a href="#scan">← Erfassen</a></p><h2>Kästchen ${esc(it.box)} ${chip(it)}</h2>
-    <img class="big" data-ph="${esc(it.id)}" alt="">
-    <ol class="steps">${STEPS.map(([k, l], i) => `<li class="${i <= st ? 'on' : ''}">${l}</li>`).join('')}</ol>`;
-  if (it.err) h += `<div class="errbox"><b>Fehler bei „${esc(it.err.step)}“</b> (${esc(tm(it.err.at))})<br>${esc(it.err.msg)}${it.err.hint ? `<br><span class="mut">${esc(it.err.hint)}</span>` : ''}</div>`;
-
+  let h = `<img class="big" data-ph="${esc(it.id)}" alt="Foto Kästchen ${esc(it.box)}">
+    <div class="steps" aria-hidden="true">${STEPS.map((x, i) => `<i class="${i <= st ? 'on' : ''}"></i>`).join('')}</div>
+    <div class="stepl">Schritt ${st + 1} von 4: ${esc(STEPS[st][1])}${it.err ? ' · <span class="miss">Fehler</span>' : ''}</div>`;
+  if (it.err) h += `<div class="errbox"><b>${esc(it.err.msg)}</b>${it.err.hint ? `<br>${esc(it.err.hint)}` : ''}</div>`;
+  let bar = '';
   if (saved) {
     const s = it.saved || {};
-    h += `<div class="okbox">In Tabelle gespeichert: Zeile ${esc(s.row)} · ${esc(tm(s.at))}${s.already ? ' (war schon so eingetragen)' : ''}<br>
-      <b>${esc(it.parts)}</b>${it.name ? ' – ' + esc(it.name) : ''}${it.note ? `<br><span class="mut">${esc(it.note)}</span>` : ''}
-      ${s.photo && safeUrl(s.photo.url) ? `<br><a href="${esc(safeUrl(s.photo.url))}" target="_blank" rel="noopener">Foto in Google Drive</a>` : ''}</div>`;
+    h += `<div class="okbox">Gespeichert in Zeile ${esc(s.row)} · ${esc(tm(s.at))}${s.already ? ' (war schon so eingetragen)' : ''}</div>
+      <div class="bignr">${esc(it.parts)}</div><div>${esc(it.name)}</div>${it.note ? `<div class="mut">${esc(it.note)}</div>` : ''}
+      ${s.photo && safeUrl(s.photo.url) ? `<p><a href="${esc(safeUrl(s.photo.url))}" target="_blank" rel="noopener">Foto in Google Drive</a></p>` : ''}`;
   } else if (it.status === 'bestaetigt') {
     const c = boxCheck(it.box, it.id);
-    h += `<div class="addbox"><div class="mut">Bestätigt am ${esc(tm(it.confirmed.at))}</div><div class="bignr">${esc(it.parts)}</div>
-      <div>${esc(it.name) || '<span class="mut">ohne Bezeichnung</span>'}</div>${it.note ? `<div class="mut">Notiz: ${esc(it.note)}</div>` : ''}
-      <p class="mut">Vorher in der Tabelle: ${c.cur && c.cur.parts ? esc(c.cur.parts) : 'leer'}</p>${warnHTML([...c.w, ...partCheck(it, it.parts)])}
-      <div class="row2"><button class="pri" data-a="s-save" ${saveBusy ? 'disabled' : ''}>${saveBusy === it.id ? 'Speichere …' : 'In Tabelle speichern'}</button><button data-a="s-edit">Ändern</button></div>
-      ${it.err && it.err.step === 'konflikt' && it.err.current ? `<button class="warn wide" data-a="s-force">Aktuellen Inhalt „${esc(it.err.current.parts)}“ überschreiben</button>` : ''}</div>`;
+    h += `<div class="bignr">${esc(it.parts)}</div><div>${esc(it.name) || '<span class="mut">ohne Bezeichnung</span>'}</div>${it.note ? `<div class="mut">Notiz: ${esc(it.note)}</div>` : ''}
+      <p class="mut" style="font-size:14px">Vorher in der Tabelle: ${c.cur && c.cur.parts ? esc(c.cur.parts) : 'leer'}</p>${warnHTML([...c.w, ...partCheck(it, it.parts)])}`;
+    if (it.err && it.err.step === 'konflikt' && it.err.current) h += `<button class="warn wide" data-a="s-force">Aktuellen Inhalt „${esc(it.err.current.parts)}“ überschreiben</button>`;
+    bar = `<button data-a="s-edit">Ändern</button><button class="pri" data-a="s-save" ${saveBusy ? 'disabled' : ''}>${saveBusy === it.id ? 'Speichere …' : 'In Tabelle speichern'}</button>`;
   } else {
-    h += `<div class="row2"><input id="dbox" inputmode="numeric" pattern="[0-9]*" value="${esc(it.box)}" aria-label="Kästchennummer"><button data-a="s-renum">Nummer ändern</button></div>
-      <button class="wide" data-a="s-rec" ${recBusy ? 'disabled' : ''}>${recBusy === it.id ? 'Erkenne …' : (it.cands ? '🔍 Nochmal erkennen' : '🔍 Erkennen (Internet)')}</button>`;
-    if (it.cands) {
-      h += it.cands.length ? '<p class="mut">Vorschlag antippen übernimmt ihn in die Felder. Bild genau vergleichen!</p>' : '<p class="mut">Keine Vorschläge – bitte Nummer selbst eintragen.</p>';
-      h += it.cands.map((c, i) => `<button class="cand${splitParts(it.parts)[0] === norm(c.id) ? ' sel' : ''}" data-a="s-pick" data-i="${i}">${img(c.img)}<span><b>${esc(c.id)}</b> <span class="mut">${Math.round(c.score * 100)} %</span><br><span class="nm">${esc(c.name)}</span></span></button>`).join('');
-    }
-    h += `<label for="dparts">Teilenummer(n)</label><input id="dparts" value="${esc(it.parts)}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="z. B. 3001 – mehrere mit Komma">
+    h += `<button class="wide" data-a="s-rec" ${recBusy ? 'disabled' : ''}>${recBusy === it.id ? 'Erkenne …' : (it.cands ? 'Nochmal erkennen' : 'Erkennen')}</button>`;
+    if (it.cands) h += it.cands.length ? it.cands.map((c, i) => `<button class="cand${splitParts(it.parts)[0] === norm(c.id) ? ' sel' : ''}" data-a="s-pick" data-i="${i}">${img(c.img)}<span><b>${esc(c.id)}</b> <span class="mut">${Math.round(c.score * 100)} %</span><br><span class="nm">${esc(c.name)}</span></span></button>`).join('')
+      : '<p class="mut">Keine Vorschläge – Nummer bitte selbst eintragen.</p>';
+    h += `<label for="dparts">Teilenummer</label><input id="dparts" value="${esc(it.parts)}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="mehrere mit Komma">
       <label for="dname">Bezeichnung</label><input id="dname" value="${esc(it.name)}" autocomplete="off">
       <label for="dnote">Notiz</label><input id="dnote" value="${esc(it.note)}" autocomplete="off">
-      <label class="chk"><input type="checkbox" id="dunsure" ${it.unsure ? 'checked' : ''}> Unsicher – „bitte prüfen“ in die Tabelle</label>
+      <label class="chk"><input type="checkbox" id="dunsure" ${it.unsure ? 'checked' : ''}> Unsicher – „bitte prüfen“ vermerken</label>
       <div id="dwarn">${warnHTML(partCheck(it, it.parts))}</div>
-      <button class="pri wide" data-a="s-confirm">Bestätigen</button>`;
+      <details><summary>Kästchennummer ändern</summary><div class="row2"><input id="dbox" inputmode="numeric" pattern="[0-9]*" value="${esc(it.box)}" aria-label="Kästchennummer"><button data-a="s-renum">Übernehmen</button></div></details>`;
+    bar = `<button class="pri" data-a="s-confirm">Bestätigen</button>`;
   }
-  h += `<details ${it.err ? 'open' : ''}><summary><b>Protokoll</b> (${it.log.length})</summary><div class="log">${it.log.map(([t, m, l]) => `<div class="${l === 'err' ? 'miss' : ''}"><span class="mut">${esc(tm(t))}</span> ${esc(m)}</div>`).join('')}</div>
-    <p class="mut">Vorgang ${esc(it.id)}</p></details>
-    <div class="row2"><button class="${scanArmed === it.id ? 'warn' : ''}" data-a="s-del">${scanArmed === it.id ? 'Wirklich löschen?' : 'Eintrag löschen'}</button></div>`;
+  h += `<details ${it.err ? 'open' : ''}><summary>Protokoll (${it.log.length})</summary><div class="log">${it.log.map(([t, m, l]) => `<div class="${l === 'err' ? 'miss' : ''}"><span class="mut">${esc(tm(t))}</span> ${esc(m)}</div>`).join('')}</div>
+    <p class="mut" style="font-size:13px">Vorgang ${esc(it.id)}</p>
+    <div class="row2"><button class="${scanArmed === it.id ? 'warn' : ''}" data-a="s-del">${scanArmed === it.id ? 'Wirklich löschen?' : 'Eintrag löschen'}</button></div></details>`;
+  if (bar) h += `<div class="actionbar">${bar}</div>`;
   return h;
 }
 
@@ -297,7 +297,7 @@ document.addEventListener('input', ev => {
   if (t.id === 'sbox') {
     draftBox = t.value.trim();
     const c = draftBox ? boxCheck(draftBox) : null, i = $('#sboxinfo');
-    if (i) i.innerHTML = c ? (c.bad ? `<p class="miss">${esc(c.bad)}</p>` : warnHTML(c.w) || '<p class="mut">Kästchen ist in der Tabelle frei.</p>') : '';
+    if (i) i.innerHTML = boxInfo(c);
   }
   if (['dparts', 'dname', 'dnote'].includes(t.id)) {
     const r = route(), it = S.scan.items[r.id];

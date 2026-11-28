@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '2.4';
+const VERSION = '3.0';
 const API = 'https://rebrickable.com/api/v3/lego';
 const DEFAULT_SHEET = '';
 const $ = s => document.querySelector(s);
@@ -7,7 +7,8 @@ const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const fmt = n => Number(n || 0).toLocaleString('de-DE');
 const safeUrl = u => (typeof u === 'string' && u.startsWith('https://')) ? u : '';
 const CN={"Black":"Schwarz","White":"Weiß","Red":"Rot","Blue":"Blau","Yellow":"Gelb","Green":"Grün","Bright Green":"Hellgrün","Light Bluish Gray":"Hellgrau","Dark Bluish Gray":"Dunkelgrau","Light Gray":"Altgrau hell","Dark Gray":"Altgrau dunkel","Tan":"Beige","Dark Tan":"Dunkelbeige","Reddish Brown":"Rotbraun","Brown":"Braun (alt)","Dark Brown":"Dunkelbraun","Orange":"Orange","Lime":"Limette","Dark Red":"Dunkelrot","Dark Blue":"Dunkelblau","Medium Blue":"Mittelblau","Medium Azure":"Azur","Dark Azure":"Dunkelazur","Sand Green":"Sandgrün","Sand Blue":"Sandblau","Dark Green":"Dunkelgrün","Olive Green":"Olivgrün","Pearl Gold":"Perlgold","Flat Silver":"Silber","Medium Nougat":"Nougat","Light Nougat":"Hautfarbe hell","Nougat":"Nougat hell","Bright Pink":"Hellpink","Dark Pink":"Pink","Magenta":"Magenta","Medium Lavender":"Lavendel","Dark Purple":"Dunkellila","Bright Light Orange":"Hellorange","Bright Light Yellow":"Hellgelb","Dark Orange":"Dunkelorange","Trans-Clear":"Transparent","Trans-Red":"Trans-Rot","Trans-Light Blue":"Trans-Hellblau","Trans-Yellow":"Trans-Gelb","Trans-Black":"Trans-Schwarz","Trans-Neon Green":"Trans-Neongrün","Trans-Orange":"Trans-Orange","Trans-Dark Blue":"Trans-Dunkelblau","Trans-Green":"Trans-Grün","Chrome Gold":"Chromgold","Chrome Silver":"Chromsilber","Pearl Dark Gray":"Perlgrau dunkel","Metallic Silver":"Metallic-Silber"};
-const cn = c => CN[c] ? `${CN[c]} <span class="mut">(${esc(c)})</span>` : esc(c);
+const cn = c => CN[c] ? `<span title="${esc(c)}">${CN[c]}</span>` : esc(c);
+const cnLong = c => CN[c] ? `${CN[c]} <span class="mut">(${esc(c)})</span>` : esc(c);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* ---------- Speicher (IndexedDB) ---------- */
@@ -221,6 +222,7 @@ function route() {
   if (h.startsWith('print/')) return { v: 'print', id: h.slice(6) };
   if (h.startsWith('scan/')) return { v: 'scanitem', id: h.slice(5) };
   if (h.startsWith('box/')) return { v: 'box', id: h.slice(4) };
+  if (h === 'box') return { v: 'boxes' };
   if (h === 'scan') return { v: 'scan' };
   if (h === 'print') return { v: 'print' };
   if (h === 'shop' || h === 'settings') return { v: h };
@@ -228,40 +230,42 @@ function route() {
 }
 function render() {
   const r = route();
-  const tab = r.v === 'set' || r.v === 'print' || r.v === 'box' ? 'sets' : r.v === 'scanitem' ? 'scan' : r.v;
-  for (const t of ['sets', 'scan', 'shop', 'settings']) $('#t-' + t).classList.toggle('on', tab === t);
-  const open = Object.values(S.scan.items).filter(i => i.status !== 'gespeichert').length;
-  $('#t-scan').textContent = open ? `Erfassen (${open})` : 'Erfassen';
-  const n = Object.keys(S.sets).length;
-  $('#t-sets').textContent = n ? `Sets (${n})` : 'Sets';
+  const tab = { set: 'sets', print: 'sets', box: 'box', boxes: 'box', scanitem: 'scan' }[r.v] || r.v;
+  for (const t of ['sets', 'box', 'scan', 'shop', 'settings']) { const e = $('#t-' + t); e.classList.toggle('on', tab === t); e.toggleAttribute('aria-current', tab === t); }
+  $('#b-scan').textContent = Object.values(S.scan.items).filter(i => i.status !== 'gespeichert').length || '';
+  const n = Object.keys(S.sets).length, set = r.v === 'set' ? S.sets[r.id] : null, it = r.v === 'scanitem' ? S.scan.items[r.id] : null;
+  const back = { set: '#sets', box: String(lastFrom).startsWith('#set/') ? lastFrom : '#box', scanitem: '#scan', print: r.id ? '#set/' + encodeURIComponent(r.id) : '#sets' }[r.v];
+  const bk = $('#back'); bk.hidden = !back; if (back) bk.href = back;
+  $('#title').textContent = {
+    sets: n ? `Sets (${n})` : 'Sets', set: set ? (set.bag ? 'Beutel ' + set.bag : set.num) : 'Set', box: 'Kästchen ' + r.id, boxes: 'Kästchen',
+    scan: 'Erfassen', scanitem: it ? 'Kästchen ' + it.box : 'Erfassen', shop: 'Einkauf', settings: 'Mehr', print: 'Etiketten'
+  }[r.v];
   const m = $('#main');
   if (r.v === 'settings') m.innerHTML = vSettings();
   else if (r.v === 'scan') m.innerHTML = vScan();
-  else if (r.v === 'scanitem') { const it = S.scan.items[r.id]; m.innerHTML = it ? vScanItem(it) : '<p class="empty">Eintrag nicht gefunden. <a href="#scan">Zurück</a></p>'; }
+  else if (r.v === 'scanitem') m.innerHTML = it ? vScanItem(it) : '<p class="empty">Eintrag nicht gefunden.</p>';
   else if (r.v === 'shop') m.innerHTML = vShop();
   else if (r.v === 'box') m.innerHTML = vBox(r.id);
+  else if (r.v === 'boxes') m.innerHTML = vBoxes();
   else if (r.v === 'print') m.innerHTML = vPrint(r.id);
-  else if (r.v === 'set') { const s = S.sets[r.id]; m.innerHTML = s ? vSet(s) : '<p class="empty">Set nicht gefunden. <a href="#sets">Zur Übersicht</a></p>'; }
+  else if (r.v === 'set') m.innerHTML = set ? vSet(set) : '<p class="empty">Set nicht gefunden.</p>';
   else m.innerHTML = vSets();
-  document.documentElement.style.setProperty('--hh', $('header').offsetHeight + 'px');
   if (r.v === 'scan' || r.v === 'scanitem') fillPhotos();
 }
 const img = (u, cls = '') => u ? `<img src="${esc(u)}" alt="" loading="lazy" class="${cls}" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ph',textContent:'kein Bild'}))">` : '<div class="ph">kein Bild</div>';
 
 function vSets() {
-  let list = Object.values(S.sets).sort((a, b) => (a.bagged - b.bagged) || String(b.added).localeCompare(String(a.added)));
+  let list = Object.values(S.sets).sort((a, b) => (a.bagged - b.bagged) || bagNo(a.bag) - bagNo(b.bag));
   const open = addOpen || !list.length || busy;
   let h = backupBar();
-  if (list.length) h += `<div class="row2"><input id="q" type="search" placeholder="Suchen: Teilenummer, Set oder Name" value="${esc(query)}" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
-  <div class="row2"><input id="boxgo" inputmode="numeric" pattern="[0-9]*" placeholder="Kästchen-Nr." autocomplete="off" style="flex:0 1 150px"><button data-a="boxgo">Kästchen öffnen</button></div>
-  <div class="row2"><button data-a="toggleadd">${open ? '× Hinzufügen schließen' : '+ Sets hinzufügen'}</button><a class="btn" href="#print">Etiketten drucken</a></div>`;
+  if (list.length) h += `<div class="sticky"><input id="q" type="search" placeholder="Suchen: Teil, Set, Beutel" value="${esc(query)}" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Suchen"></div>`;
+  if (!S.settings.key) h += `<div class="warnbox">Zum Anlegen von Sets fehlt der Rebrickable-Schlüssel – <a href="#settings">unter „Mehr“ eintragen</a>.</div>`;
   if (open) {
-    h += `<div class="addbox"><b>Neues Set laden</b><div class="row2"><input id="newset" inputmode="text" placeholder="Set-Nummer, z. B. 6086" autocomplete="off" ${busy ? 'disabled' : ''}><button class="pri" data-a="add" ${busy ? 'disabled' : ''}>Laden</button></div>`;
-    if (!busy) h += '<div class="row2"><label class="btn" style="flex:1">Set-Liste importieren (CSV von Rebrickable)<input type="file" id="csvin" accept=".csv,text/csv,text/plain" hidden></label></div>';
-    h += '<p class="mut" style="margin:0">Nur hier werden Sets angelegt. Teile suchst du oben im Suchfeld.</p></div>';
+    h += `<div class="addbox"><div class="row2" style="margin:0"><input id="newset" inputmode="text" placeholder="Set-Nummer, z. B. 6086" autocomplete="off" aria-label="Set-Nummer" ${busy ? 'disabled' : ''}><button class="pri" data-a="add" ${busy ? 'disabled' : ''}>Laden</button></div>`;
+    if (!busy) h += '<div class="row2" style="margin-bottom:0"><label class="btn" style="flex:1;margin:0;font-size:15px">CSV-Liste von Rebrickable importieren<input type="file" id="csvin" accept=".csv,text/csv,text/plain" hidden></label></div>';
+    h += '</div>';
   }
   if (busy) h += `<p class="prog"><b>${esc(busy)}</b> <span id="prog"></span></p>`;
-  if (!S.settings.key) h += `<p class="mut">Zuerst in den <a href="#settings">Einstellungen</a> den Rebrickable-API-Schlüssel eintragen.</p>`;
   const q = norm(query), hits = {};
   if (q) list = list.filter(s => {
     if (norm(s.num + s.name).includes(q) || norm(s.bag) === q) return true;
@@ -269,14 +273,19 @@ function vSets() {
     if (its.length) { hits[s.num] = its; return true; }
     return false;
   });
-  if (q && !list.length) return h + '<p class="empty">Kein Set enthält das gesuchte Teil.</p>';
-  if (!list.length) return h + '<p class="empty">Noch keine Sets. Gib oben eine Set-Nummer ein, solange du Internet hast. Teileliste und Bilder werden dann fürs Arbeiten im Keller gespeichert.</p>';
-  return h + list.map(s => {
+  if (q && !list.length) return h + '<p class="empty">Nichts gefunden.</p>';
+  if (!list.length) return h + '<p class="empty">Noch keine Sets. Set-Nummer eingeben, solange du Internet hast – Teileliste und Bilder werden fürs Arbeiten offline gespeichert.</p>';
+  h += list.map(s => {
     const t = tot(s), g = fnd(s), st = status(s), mc = missing(s).reduce((a, i) => a + i.qty - i.found, 0);
-    return `<a class="card" href="#set/${encodeURIComponent(s.num)}">${img(s.img)}<div><div class="mut"><span class="bagno">${esc(s.bag || '–')}</span> ${esc(s.num)}<span class="chip ${st === 'komplett' || st === 'eingebeutelt' ? 'ok' : ''}">${esc(st)}</span></div><b>${esc(s.name)}</b><div class="bar"><i style="width:${t ? Math.round(g / t * 100) : 0}%"></i></div><div class="mut">${fmt(g)} / ${fmt(t)} Teile${mc ? ` · <span class="miss">${fmt(mc)} fehlen</span>` : ''}</div>${hits[s.num] ? hits[s.num].map(it => { const L = locate(it); return `<div class="nm">→ ${it.qty}× ${esc(it.part)} ${CN[it.color] || esc(it.color)} · ${L.boxes.length ? 'Kästchen ' + L.boxes.map(esc).join(', ') : 'kein Standort'}</div>`; }).join('') : ''}</div></a>`;
+    const chip = st === 'eingebeutelt' || st === 'komplett' ? `<span class="chip ok">${esc(st)}</span>` : '';
+    return `<a class="card" href="#set/${encodeURIComponent(s.num)}">${img(s.img)}<div><div class="l1"><span class="bagno">${esc(s.bag || '–')}</span><b>${esc(s.name)}</b></div><div class="bar"><i style="width:${t ? Math.round(g / t * 100) : 0}%"></i></div><div class="mut" style="font-size:13px">${esc(s.num.replace(/-1$/, ''))} · ${fmt(g)}/${fmt(t)} Teile${mc ? ` · <span class="miss">${fmt(mc)} fehlen</span>` : ''} ${chip}</div>${hits[s.num] ? hits[s.num].map(it => { const L = locate(it); return `<div class="nm">→ ${it.qty}× ${esc(it.part)} ${CN[it.color] || esc(it.color)} · ${L.boxes.length ? 'Kästchen ' + L.boxes.map(esc).join(', ') : 'kein Standort'}</div>`; }).join('') : ''}</div></a>`;
   }).join('');
+  return h + `<div class="row2" style="margin-top:16px"><button data-a="toggleadd">${open ? 'Hinzufügen schließen' : '+ Sets hinzufügen'}</button><a class="btn" href="#print">Etiketten drucken</a></div>`;
 }
 
+function itemRow(it, i, attrs, left, line2) {
+  return `<div class="it ${it.done ? 'done' : ''}"><div class="tap" data-a="inc" ${attrs} data-i="${i}">${left}<div><div class="q">${it.found}<small> / ${it.qty}</small> <span class="nm" style="font-size:14px;font-weight:500"><span class="sw" style="background:#${esc(it.rgb)}"></span>${cn(it.color)}</span></div><div class="nm mut">${line2}</div></div></div><div class="side"><button data-a="dec" ${attrs} data-i="${i}" aria-label="ein Stück weniger">−1</button><button class="fz" data-a="done" ${attrs} data-i="${i}" aria-label="${it.done ? 'Wieder öffnen' : 'Als fertig markieren'}">${it.done ? '↺' : '✓'}</button></div></div>`;
+}
 function vSet(s) {
   const t = tot(s), g = fnd(s), st = status(s);
   const groups = new Map();
@@ -287,31 +296,33 @@ function vSet(s) {
     groups.get(key).push({ it, i, L });
   });
   const keys = [...groups.keys()].sort((a, b) => a.startsWith('~') - b.startsWith('~') || boxSort(a, b));
-  let h = `<a href="#sets" class="mut" style="display:inline-block;min-height:44px;line-height:44px">← Alle Sets</a>
-  <div class="mut"><span class="bagno">${esc(s.bag || '–')}</span> ${esc(s.num)}${s.year ? ' · ' + esc(s.year) : ''}<span class="chip ${st === 'komplett' || st === 'eingebeutelt' ? 'ok' : ''}">${esc(st)}</span></div>
-  <h2>${esc(s.name)}</h2><div class="bar"><i style="width:${t ? Math.round(g / t * 100) : 0}%"></i></div>
-  <div class="mut">${fmt(g)} / ${fmt(t)} Teile · Tippe auf eine Zeile für +1 Stück</div>
-  <div class="row2"><button data-a="hide">${hideDone ? 'Erledigte zeigen' : 'Erledigte ausblenden'}</button></div>`;
+  const nDone = s.items.filter(i => i.done).length;
+  let h = `<div class="seth"><span class="bagbig">${esc(s.bag || '–')}</span><div><h2>${esc(s.name)}</h2><div class="mut" style="font-size:13px">${esc(s.num)}${s.year ? ' · ' + esc(s.year) : ''} · ${esc(st)}</div></div></div>
+  <div class="bar"><i style="width:${t ? Math.round(g / t * 100) : 0}%"></i></div>
+  <div class="seg"><span class="mut">${fmt(g)} von ${fmt(t)} Teilen</span>${nDone ? `<button class="link" data-a="hide">${hideDone ? `${nDone} erledigte zeigen` : 'Erledigte ausblenden'}</button>` : ''}</div>`;
   let shown = 0;
   for (const k of keys) {
     const rows = groups.get(k).filter(x => !hideDone || !x.it.done)
       .sort((a, b) => a.it.color.localeCompare(b.it.color) || a.it.part.localeCompare(b.it.part));
     if (!rows.length) continue;
     shown += rows.length;
-    const label = k === '~fig' ? 'Minifiguren' : k === '~none' ? 'Kein Standort erfasst' : (S.locs.labels[k] || '');
-    h += `<div class="gh">${k.startsWith('~') ? `<span class="nr ${k === '~none' ? 'none' : ''}">${k === '~fig' ? '☺' : '?'}</span>` : `<a class="nr" href="#box/${esc(k)}" title="Kästchen-Ansicht">${esc(k)}</a>`}<b>${esc(label)}</b></div>`;
+    const label = k === '~fig' ? 'Minifiguren' : k === '~none' ? 'Kein Kästchen erfasst' : (S.locs.labels[k] || '');
+    h += `<div class="gh">${k.startsWith('~') ? `<span class="nr ${k === '~none' ? 'none' : ''}">${k === '~fig' ? '☺' : '?'}</span>` : `<a class="nr" href="#box/${esc(k)}" aria-label="Kästchen ${esc(k)} öffnen">${esc(k)}</a>`}<b>${esc(label)}</b></div>`;
     h += rows.map(({ it, i, L }) => {
       const extra = [];
       if (L.boxes.length > 1) extra.push('auch ' + L.boxes.slice(1).map(esc).join(', '));
       if (L.fuzzy) extra.push('Variante prüfen');
-      return `<div class="it ${it.done ? 'done' : ''}"><div class="tap" data-a="inc" data-i="${i}">${img(it.img)}<div><div class="q">${it.found}<small> / ${it.qty}</small></div><div class="nm"><span class="sw" style="background:#${esc(it.rgb)}"></span>${cn(it.color)}</div><div class="nm">${esc(it.name)}</div><div class="mut">${esc(it.part)}${extra.length ? ' · ' + extra.join(' · ') : ''}</div></div></div><div class="side"><button class="fz" data-a="done" data-i="${i}">${it.done ? 'Öffnen' : 'Fertig'}</button><button data-a="dec" data-i="${i}" aria-label="ein Stück weniger">−1</button></div></div>`;
+      return itemRow(it, i, '', img(it.img), `${esc(it.part)} · ${esc(it.name)}${extra.length ? ' · ' + extra.join(' · ') : ''}`);
     }).join('');
   }
   if (!shown) h += `<p class="empty">${hideDone ? 'Alles erledigt.' : 'Keine Teile.'}</p>`;
   const mc = missing(s).reduce((a, i) => a + i.qty - i.found, 0);
-  if (mc) h += `<p style="margin-top:18px"><a href="#shop">${fmt(mc)} fehlende Teile auf der Einkaufsliste →</a></p>`;
-  h += `<div class="row2" style="margin-top:24px"><a class="btn" href="#print/${encodeURIComponent(s.num)}">Etikett drucken</a><input id="bagin" value="${esc(s.bag || '')}" autocapitalize="characters" autocomplete="off" style="flex:0 1 90px" aria-label="Beutelnummer"><button data-a="setbag">Beutel-Nr. ändern</button></div>`;
-  h += `<div class="row2">${s.bagged ? '<button data-a="unbag">Doch nicht eingebeutelt</button>' : '<button class="pri" data-a="bag">Als eingebeutelt markieren</button>'}<button class="${armed === 'del' ? 'warn' : ''}" data-a="del">${armed === 'del' ? 'Wirklich löschen?' : 'Set löschen'}</button></div>`;
+  if (mc) h += `<p><a href="#shop">${fmt(mc)} fehlende Teile auf der Einkaufsliste</a></p>`;
+  h += `<div class="row2" style="margin-top:18px">${s.bagged ? '<button data-a="unbag">Doch nicht eingebeutelt</button>' : `<button class="${nDone === s.items.length ? 'pri' : ''}" data-a="bag">Als eingebeutelt markieren</button>`}</div>
+  <details><summary>Weitere Aktionen</summary>
+  <div class="row2"><a class="btn" href="#print/${encodeURIComponent(s.num)}">Etikett drucken</a></div>
+  <div class="row2"><input id="bagin" value="${esc(s.bag || '')}" autocapitalize="characters" autocomplete="off" aria-label="Beutelnummer" style="flex:0 1 100px"><button data-a="setbag">Beutelnummer ändern</button></div>
+  <div class="row2"><button class="${armed === 'del' ? 'warn' : ''}" data-a="del">${armed === 'del' ? 'Wirklich löschen?' : 'Set löschen'}</button></div></details>`;
   return h;
 }
 
@@ -322,38 +333,39 @@ function shopItems() {
 }
 function vShop() {
   const L = shopItems();
-  if (!L.length) return '<p class="empty">Die Einkaufsliste ist leer. Was beim Suchen fehlt, landet hier automatisch, sobald du eine Zeile auf „Fertig“ setzt.</p>';
+  if (!L.length) return '<p class="empty">Nichts zu kaufen. Teile landen hier, wenn du eine Zeile mit ✓ abschließt, obwohl noch Stücke fehlen.</p>';
   const total = L.reduce((a, x) => a + x.n, 0);
-  let h = `<h2>Einkaufsliste</h2><p class="mut">${fmt(total)} Teile in ${fmt(L.length)} Positionen</p>
-  <div class="row2"><button data-a="share">Als Text teilen</button><button data-a="cpxml">BrickLink-XML kopieren</button><button data-a="cpcsv">Rebrickable-CSV kopieren</button></div><div id="out"></div>`;
+  let h = `<p class="mut">${fmt(total)} Teile in ${fmt(L.length)} Positionen</p>
+  <div class="row2"><button class="pri" data-a="share">Liste teilen</button><button data-a="cpxml">BrickLink-XML</button><button data-a="cpcsv">Rebrickable-CSV</button></div><div id="out"></div>`;
   let last = '';
   for (const x of L) {
-    if (x.s.num !== last) { last = x.s.num; h += `<div class="gh"><span class="nr">${esc(x.s.num)}</span><b>${esc(x.s.name)}</b></div>`; }
+    if (x.s.num !== last) { last = x.s.num; h += `<div class="gh"><span class="bagno" style="font-size:16px;padding:4px 8px">${esc(x.s.bag || '–')}</span><b>${esc(x.s.name)}</b></div>`; }
     const i = x.s.items.indexOf(x.it);
-    h += `<div class="it">${img(x.it.img)}<div><div class="q">${x.n}×</div><div class="nm"><span class="sw" style="background:#${esc(x.it.rgb)}"></span>${cn(x.it.color)}</div><div class="nm">${esc(x.it.name)}</div><div class="mut">${esc(x.it.part)}</div></div><div class="side"><button data-a="got" data-s="${esc(x.s.num)}" data-i="${i}">Erhalten</button></div></div>`;
+    h += `<div class="it">${img(x.it.img)}<div><div class="q">${x.n}× <span class="nm" style="font-size:14px;font-weight:500"><span class="sw" style="background:#${esc(x.it.rgb)}"></span>${cn(x.it.color)}</span></div><div class="nm mut">${esc(x.it.part)} · ${esc(x.it.name)}</div></div><div class="side"><button data-a="got" data-s="${esc(x.s.num)}" data-i="${i}">Erhalten</button></div></div>`;
   }
   return h;
 }
 
 function vSettings() {
-  const l = S.locs;
-  return `<h2>Einstellungen</h2>
+  const l = S.locs, lb = S.meta.lastBackup, conf = S.settings.key && (S.settings.scriptUrl || S.settings.sheetId);
+  return `<h3 class="sec" style="margin-top:6px">Sicherung</h3>
+  <p style="margin:4px 0">${lb ? `Zuletzt ${esc(tm(lb.at))} · ${fmt(lb.sets)} Sets` : 'Noch nie gesichert'}${S.meta.changes ? ` · <span class="miss">${fmt(S.meta.changes)} Änderungen offen</span>` : ''}</p>
+  <div class="row2"><button class="pri" data-a="b-save">Nach Drive sichern</button><button data-a="b-list">Wiederherstellen …</button></div><div id="bout"></div>
+  <h3 class="sec">Kästchenliste</h3>
+  <p style="margin:4px 0">${l.updated ? `Stand ${esc(tm(l.updated))} · ${fmt(Object.values(l.boxes || {}).filter(b => b.parts).length)} Kästchen belegt` : 'Noch nicht geladen'}</p>
+  <div class="row2"><button data-a="locs">Jetzt laden</button></div>
+  <h3 class="sec">Offline</h3>
+  <div class="row2"><button data-a="imgs">Bilder aller Sets laden</button></div><p class="mut" id="imgprog" style="margin:0">Einmal mit WLAN, damit im Keller alle Teilebilder da sind.</p>
+  <details ${conf ? '' : 'open'}><summary>Verbindungen</summary>
   <label for="k">Rebrickable-API-Schlüssel</label><input id="k" value="${esc(S.settings.key)}" autocomplete="off" autocapitalize="off" spellcheck="false">
-  <p class="mut">Kostenlos: auf rebrickable.com anmelden → Profil → Settings → API → „Generate new API key“.</p>
+  <p class="mut" style="margin:4px 0">rebrickable.com → Profil → Settings → API → „Generate new API key“</p>
   <label for="sh">Google-Tabelle (ID)</label><input id="sh" value="${esc(S.settings.sheetId)}" autocomplete="off" autocapitalize="off" spellcheck="false">
-  <label for="su">Skript-URL (zum Speichern)</label><input id="su" value="${esc(S.settings.scriptUrl)}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec">
+  <label for="su">Skript-URL</label><input id="su" value="${esc(S.settings.scriptUrl)}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec">
   <label for="tk">Skript-Schlüssel</label><input id="tk" value="${esc(S.settings.token)}" autocomplete="off" autocapitalize="off" spellcheck="false">
-  <div class="row2"><button class="pri" data-a="savecfg">Speichern</button><button data-a="ping">Verbindung testen</button><button data-a="locs">Kästchen jetzt laden</button></div>
-  <div id="pingout"></div>
-  <p class="mut">${l.updated ? `Kästchen zuletzt geladen: ${esc(new Date(l.updated).toLocaleString('de-DE'))} (über ${esc(l.src || 'Link')}) · ${fmt(Object.values(l.boxes || {}).filter(b => b.parts).length)} Kästchen belegt · ${fmt(l.rows)} Teilenummern` : 'Kästchen noch nicht geladen.'} Lade sie neu, bevor du in den Keller gehst.</p>
-  <details open><summary><b>Sicherung</b></summary>
-  <p class="mut">Dein Fortschritt liegt auf diesem Gerät. Sichere ihn regelmäßig nach Google Drive – jede Sicherung ist eine eigene Datei.</p>
-  <p>${S.meta.lastBackup ? `Zuletzt gesichert: ${esc(tm(S.meta.lastBackup.at))} · ${fmt(S.meta.lastBackup.sets)} Sets, ${fmt(S.meta.lastBackup.found)} Teile` : 'Noch nie nach Drive gesichert.'}${S.meta.changes ? ` · <b>${fmt(S.meta.changes)} Änderungen offen</b>` : ''}</p>
-  <div class="row2"><button class="pri" data-a="b-save">Jetzt nach Drive sichern</button><button data-a="b-list">Aus Drive wiederherstellen …</button></div><div id="bout"></div>
-  <div class="row2"><button data-a="imgs">Bilder aller Sets offline laden</button></div><p class="mut" id="imgprog">Nach dem Übertragen von einem anderen Gerät einmal mit WLAN ausführen, sonst fehlen im Keller die Bilder.</p>
-  <p class="mut">Zusätzlich als Text (z. B. für ein anderes Gerät):</p>
-  <div class="row2"><button data-a="export">Sicherung teilen/kopieren</button><button data-a="importshow">Sicherung einspielen</button></div><div id="out"></div></details>
-  <p class="mut" style="margin-top:20px">Version ${VERSION} · <span id="persist"></span></p>`;
+  <div class="row2"><button class="pri" data-a="savecfg">Speichern</button><button data-a="ping">Verbindung testen</button></div><div id="pingout"></div></details>
+  <details><summary>Sicherung als Text</summary>
+  <div class="row2"><button data-a="export">Teilen/Kopieren</button><button data-a="importshow">Einspielen</button></div><div id="out"></div></details>
+  <p class="mut" style="margin-top:20px;font-size:13px">Version ${VERSION} · <span id="persist"></span></p>`;
 }
 
 function labelsFor(r) {
@@ -363,12 +375,11 @@ function labelsFor(r) {
 }
 function vPrint(id) {
   const r = route(), sets = labelsFor(r), size = S.settings.label || 'a5', per = size === 'a5' ? 2 : 4;
-  let h = `<div class="noprint"><a href="${r.id ? '#set/' + encodeURIComponent(r.id) : '#sets'}" class="mut" style="display:inline-block;min-height:44px;line-height:44px">← Zurück</a>
-  <h2>Etiketten drucken</h2>
+  let h = `<div class="noprint">
   <div class="row2"><select id="lsize" aria-label="Format"><option value="a5" ${size === 'a5' ? 'selected' : ''}>A5 – 2 pro A4-Blatt</option><option value="a6" ${size === 'a6' ? 'selected' : ''}>A6 – 4 pro A4-Blatt</option></select></div>`;
   if (!r.id) h += `<div class="row2"><button data-a="pnew">${printNew ? 'Zeigt: nur noch nicht gedruckte' : 'Zeigt: alle Sets'} (umschalten)</button></div>`;
   h += `<div class="row2"><button class="pri" data-a="print" ${sets.length ? '' : 'disabled'}>${sets.length} ${sets.length === 1 ? 'Etikett' : 'Etiketten'} drucken</button></div>
-  <p class="mut">Auf A4 drucken, an den gestrichelten Linien schneiden. Im Druckdialog „Ränder: keine“ bzw. Skalierung 100 % wählen.</p></div>`;
+  <p class="mut">A4, Skalierung 100 %, an den Linien schneiden.</p></div>`;
   if (!sets.length) return h + '<p class="empty">Alle Sets haben schon ein Etikett. Oben auf „alle Sets“ umschalten, um sie erneut zu drucken.</p>';
   for (let i = 0; i < sets.length; i += per) {
     h += `<div class="sheet ${size}">` + sets.slice(i, i + per).map(s => {
@@ -506,11 +517,11 @@ document.addEventListener('change', async ev => {
   const txt = await ev.target.files[0].text();
   importSets(txt);
 });
-document.addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.target.id === 'newset') { ev.preventDefault(); const v = ev.target.value.trim(); if (v && !busy) addSet(v); } });
+document.addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.target.id === 'boxgo') { ev.preventDefault(); const b = $('[data-a="boxgo"]'); if (b) b.click(); return; } if (ev.key === 'Enter' && ev.target.id === 'newset') { ev.preventDefault(); const v = ev.target.value.trim(); if (v && !busy) addSet(v); } });
 addEventListener('hashchange', () => { armed = null; render(); scrollTo(0, 0); });
 
 /* ---------- Online-Status, Start ---------- */
-const net = () => { const n = $('#net'); n.textContent = navigator.onLine ? 'online' : 'offline'; n.classList.toggle('off', !navigator.onLine); };
+const net = () => { $('#net').hidden = navigator.onLine; };
 addEventListener('online', net); addEventListener('offline', net);
 
 (async () => {
