@@ -1,6 +1,6 @@
 'use strict';
 {
-const VERSION = '1.4';
+const VERSION = '2.0';
 const API = 'https://rebrickable.com/api/v3/lego';
 const DEFAULT_SHEET = '';
 const $ = s => document.querySelector(s);
@@ -28,10 +28,10 @@ const idb = (() => {
       t.onerror = () => rej(t.error);
     });
   };
-  return { get: k => tx('readonly', s => s.get(k)), set: (k, v) => tx('readwrite', s => s.put(v, k)) };
+  return { get: k => tx('readonly', s => s.get(k)), set: (k, v) => tx('readwrite', s => s.put(v, k)), del: k => tx('readwrite', s => s.delete(k)) };
 })();
 
-const S = { settings: { key: '', sheetId: DEFAULT_SHEET }, locs: { map: {}, labels: {}, rows: 0, updated: null }, sets: {}, blColors: null };
+const S = { settings: { key: '', sheetId: DEFAULT_SHEET, scriptUrl: '', token: '' }, locs: { map: {}, labels: {}, boxes: {}, rows: 0, updated: null }, sets: {}, blColors: null, scan: { items: {}, last: 0 } };
 const saveT = {};
 function save(k) { clearTimeout(saveT[k]); saveT[k] = setTimeout(() => idb.set(k, S[k]).catch(() => toast('Speichern fehlgeschlagen')), 250); }
 
@@ -75,25 +75,33 @@ function parseCSV(t) {
   return rows;
 }
 async function loadLocs() {
-  const id = S.settings.sheetId.trim();
-  if (!id) throw new Error('Bitte die ID der Google-Tabelle eintragen.');
-  const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('Kästchen')}`;
-  let res;
-  try { res = await fetch(url, { cache: 'no-store' }); } catch (e) { throw new Error('Tabelle nicht erreichbar. Bist du online, und ist die Tabelle per Link lesbar?'); }
-  if (!res.ok) throw new Error('Tabelle nicht lesbar (' + res.status + '). Freigabe „Jeder mit dem Link“ prüfen.');
-  const txt = await res.text();
-  if (txt.trim().startsWith('<')) throw new Error('Tabelle nicht freigegeben. Bitte „Jeder mit dem Link: Betrachter“ einstellen.');
-  const rows = parseCSV(txt), map = {}, labels = {};
+  let rows, src;
+  if (S.settings.scriptUrl && S.settings.token) {
+    rows = (await gs({ action: 'read' })).rows; src = 'Skript';
+  } else {
+    const id = S.settings.sheetId.trim();
+    if (!id) throw new Error('Bitte die ID der Google-Tabelle eintragen.');
+    const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('Kästchen')}`;
+    let res;
+    try { res = await fetch(url, { cache: 'no-store' }); } catch (e) { throw new Error('Tabelle nicht erreichbar. Bist du online, und ist die Tabelle per Link lesbar?'); }
+    if (!res.ok) throw new Error('Tabelle nicht lesbar (' + res.status + '). Freigabe „Jeder mit dem Link“ prüfen.');
+    const txt = await res.text();
+    if (txt.trim().startsWith('<')) throw new Error('Tabelle nicht freigegeben. Bitte „Jeder mit dem Link: Betrachter“ einstellen.');
+    rows = parseCSV(txt).slice(1); src = 'Link';
+  }
+  const map = {}, labels = {}, boxes = {};
   let n = 0;
-  for (const r of rows.slice(1)) {
+  for (const r of rows) {
     const box = String(r[0] || '').trim();
     if (!box || /^beispiel$/i.test(box)) continue;
-    const parts = String(r[1] || '').split(/[,;\/\s]+/).map(norm).filter(Boolean);
+    const raw = String(r[1] || '').trim();
+    boxes[box] = { parts: raw, name: String(r[2] || '').trim(), note: String(r[3] || '').trim() };
+    const parts = raw.split(/[,;\/\s]+/).map(norm).filter(Boolean);
     if (r[2]) labels[box] = String(r[2]).trim();
     for (const p of parts) { (map[p] ??= []); if (!map[p].includes(box)) map[p].push(box); n++; }
   }
   for (const k in map) map[k].sort(boxSort);
-  S.locs = { map, labels, rows: n, updated: new Date().toISOString() };
+  S.locs = { map, labels, boxes, rows: n, updated: new Date().toISOString(), src };
   save('locs');
   return n;
 }
@@ -202,22 +210,30 @@ function route() {
   const h = decodeURIComponent(location.hash.slice(1));
   if (h.startsWith('set/')) return { v: 'set', id: h.slice(4) };
   if (h.startsWith('print/')) return { v: 'print', id: h.slice(6) };
+  if (h.startsWith('scan/')) return { v: 'scanitem', id: h.slice(5) };
+  if (h === 'scan') return { v: 'scan' };
   if (h === 'print') return { v: 'print' };
   if (h === 'shop' || h === 'settings') return { v: h };
   return { v: 'sets' };
 }
 function render() {
   const r = route();
-  for (const t of ['sets', 'shop', 'settings']) $('#t-' + t).classList.toggle('on', (r.v === 'set' || r.v === 'print' ? 'sets' : r.v) === t);
+  const tab = r.v === 'set' || r.v === 'print' ? 'sets' : r.v === 'scanitem' ? 'scan' : r.v;
+  for (const t of ['sets', 'scan', 'shop', 'settings']) $('#t-' + t).classList.toggle('on', tab === t);
+  const open = Object.values(S.scan.items).filter(i => i.status !== 'gespeichert').length;
+  $('#t-scan').textContent = open ? `Erfassen (${open})` : 'Erfassen';
   const n = Object.keys(S.sets).length;
   $('#t-sets').textContent = n ? `Sets (${n})` : 'Sets';
   const m = $('#main');
   if (r.v === 'settings') m.innerHTML = vSettings();
+  else if (r.v === 'scan') m.innerHTML = vScan();
+  else if (r.v === 'scanitem') { const it = S.scan.items[r.id]; m.innerHTML = it ? vScanItem(it) : '<p class="empty">Eintrag nicht gefunden. <a href="#scan">Zurück</a></p>'; }
   else if (r.v === 'shop') m.innerHTML = vShop();
   else if (r.v === 'print') m.innerHTML = vPrint(r.id);
   else if (r.v === 'set') { const s = S.sets[r.id]; m.innerHTML = s ? vSet(s) : '<p class="empty">Set nicht gefunden. <a href="#sets">Zur Übersicht</a></p>'; }
   else m.innerHTML = vSets();
   document.documentElement.style.setProperty('--hh', $('header').offsetHeight + 'px');
+  if (r.v === 'scan' || r.v === 'scanitem') fillPhotos();
 }
 const img = (u, cls = '') => u ? `<img src="${esc(u)}" alt="" loading="lazy" class="${cls}" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ph',textContent:'kein Bild'}))">` : '<div class="ph">kein Bild</div>';
 
@@ -313,8 +329,11 @@ function vSettings() {
   <label for="k">Rebrickable-API-Schlüssel</label><input id="k" value="${esc(S.settings.key)}" autocomplete="off" autocapitalize="off" spellcheck="false">
   <p class="mut">Kostenlos: auf rebrickable.com anmelden → Profil → Settings → API → „Generate new API key“.</p>
   <label for="sh">Google-Tabelle (ID)</label><input id="sh" value="${esc(S.settings.sheetId)}" autocomplete="off" autocapitalize="off" spellcheck="false">
-  <div class="row2"><button class="pri" data-a="savecfg">Speichern</button><button data-a="locs">Kästchen jetzt laden</button></div>
-  <p class="mut">${l.updated ? `Kästchen zuletzt geladen: ${esc(new Date(l.updated).toLocaleString('de-DE'))} · ${fmt(l.rows)} Teilenummern` : 'Kästchen noch nicht geladen.'} Lade sie neu, bevor du in den Keller gehst.</p>
+  <label for="su">Skript-URL (zum Speichern)</label><input id="su" value="${esc(S.settings.scriptUrl)}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec">
+  <label for="tk">Skript-Schlüssel</label><input id="tk" value="${esc(S.settings.token)}" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <div class="row2"><button class="pri" data-a="savecfg">Speichern</button><button data-a="ping">Verbindung testen</button><button data-a="locs">Kästchen jetzt laden</button></div>
+  <div id="pingout"></div>
+  <p class="mut">${l.updated ? `Kästchen zuletzt geladen: ${esc(new Date(l.updated).toLocaleString('de-DE'))} (über ${esc(l.src || 'Link')}) · ${fmt(Object.values(l.boxes || {}).filter(b => b.parts).length)} Kästchen belegt · ${fmt(l.rows)} Teilenummern` : 'Kästchen noch nicht geladen.'} Lade sie neu, bevor du in den Keller gehst.</p>
   <details><summary><b>Sicherung</b></summary>
   <p class="mut">Dein Fortschritt liegt nur auf diesem Gerät. Ab und zu sichern schadet nicht.</p>
   <div class="row2"><button data-a="export">Sicherung teilen/kopieren</button><button data-a="importshow">Sicherung einspielen</button></div><div id="out"></div></details>
@@ -416,14 +435,21 @@ document.addEventListener('click', async ev => {
   if (a === 'share') return shareOut(shopText(), 'Lego-Einkaufsliste');
   if (a === 'cpcsv') return copyOut(shopCSV());
   if (a === 'cpxml') return copyOut(await shopXML());
-  if (a === 'savecfg' || a === 'locs') {
-    S.settings.key = $('#k').value.trim(); S.settings.sheetId = $('#sh').value.trim(); save('settings');
+  if (a === 'savecfg' || a === 'locs' || a === 'ping') {
+    S.settings.key = $('#k').value.trim(); S.settings.sheetId = $('#sh').value.trim();
+    S.settings.scriptUrl = $('#su').value.trim(); S.settings.token = $('#tk').value.trim(); save('settings');
+    if (a === 'ping') {
+      const o = $('#pingout'); o.innerHTML = '<p class="mut">Teste …</p>';
+      try { const j = await gs({ action: 'ping' }); o.innerHTML = `<div class="okbox">Verbunden mit „${esc(j.spreadsheet)}“ · ${fmt(j.filled)} Kästchen belegt · Skript v${esc(j.version)}</div>`; }
+      catch (e) { o.innerHTML = `<div class="errbox"><b>${esc(e.step || 'Fehler')}</b>: ${esc(e.message)}</div>`; }
+      return;
+    }
     if (a === 'savecfg') { toast('Gespeichert'); return; }
     el.disabled = true; el.textContent = 'Lade …';
     try { const n = await loadLocs(); toast(fmt(n) + ' Teilenummern geladen'); } catch (e) { toast(e.message); }
     render(); return;
   }
-  if (a === 'export') return shareOut(JSON.stringify({ app: 'lego-lager', v: 1, at: new Date().toISOString(), settings: { sheetId: S.settings.sheetId }, sets: S.sets }), 'Lego-Lager Sicherung');
+  if (a === 'export') return shareOut(JSON.stringify({ app: 'lego-lager', v: 1, at: new Date().toISOString(), settings: { sheetId: S.settings.sheetId }, sets: S.sets, scan: S.scan }), 'Lego-Lager Sicherung');
   if (a === 'importshow') { $('#out').innerHTML = '<textarea id="imp" placeholder="Sicherung hier einfügen"></textarea><div class="row2"><button class="pri" data-a="import">Einspielen</button></div>'; return; }
   if (a === 'import') {
     try { const j = JSON.parse($('#imp').value); if (j.app !== 'lego-lager' || !j.sets) throw 0; S.sets = j.sets; save('sets'); toast('Sicherung eingespielt'); location.hash = '#sets'; }
@@ -453,14 +479,14 @@ addEventListener('online', net); addEventListener('offline', net);
 (async () => {
   net();
   try {
-    for (const k of ['settings', 'locs', 'sets', 'blColors']) { const v = await idb.get(k); if (v) S[k] = k === 'settings' ? { ...S.settings, ...v } : v; }
+    for (const k of ['settings', 'locs', 'sets', 'blColors', 'scan']) { const v = await idb.get(k); if (v) S[k] = k === 'settings' ? { ...S.settings, ...v } : v; }
   } catch (e) { toast('Gerätespeicher nicht verfügbar'); }
   render();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   if (navigator.storage && navigator.storage.persist) {
     try { const p = await navigator.storage.persist(); const e = $('#persist'); if (e) e.textContent = p ? 'Speicher dauerhaft' : 'Speicher nicht garantiert'; } catch (e) {}
   }
-  if (navigator.onLine && S.settings.sheetId && (!S.locs.updated || Date.now() - Date.parse(S.locs.updated) > 6 * 3600e3)) {
+  if (navigator.onLine && (S.settings.sheetId || S.settings.scriptUrl) && (!S.locs.updated || Date.now() - Date.parse(S.locs.updated) > 6 * 3600e3)) {
     loadLocs().then(() => render()).catch(() => {});
   }
 })();
