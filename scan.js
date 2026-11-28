@@ -140,12 +140,18 @@ function vScan() {
   if (chk.length && list.length) h += '<h3 class="sec">Weitere</h3>';
   if (all.length && !list.length && !chk.length) h += '<p class="empty">Alles gespeichert.</p>';
   for (const it of list) {
-    h += `<a class="card" href="#scan/${esc(it.id)}"><img class="thumb" data-ph="${esc(it.id)}" alt=""><div><div class="l1"><b style="flex:none">Kästchen ${esc(it.box)}</b> ${chip(it)}</div>
-      <div class="nm ${it.err ? 'miss' : 'mut'}">${it.err ? esc(it.err.msg) : it.parts ? esc(it.parts) + (it.name ? ' · ' + esc(it.name) : '') : 'noch keine Teilenummer'}</div></div></a>`;
+    const top = !it.parts && it.cands && it.cands[0];
+    const dup = it.status === 'gespeichert' ? [] : partCheck(it, it.parts || (top ? top.id : ''));
+    const len = !it.parts && top && isLong(top.name);
+    h += `<a class="card" href="#scan/${esc(it.id)}"><img class="thumb" data-ph="${esc(it.id)}" alt=""><div><div class="l1"><b style="flex:none">Kästchen ${esc(it.box)}</b> ${chip(it)}${dup.length ? '<span class="chip warnchip">Duplikat?</span>' : ''}</div>
+      <div class="nm ${it.err ? 'miss' : 'mut'}">${it.err ? esc(it.err.msg) : it.parts ? esc(it.parts) + (it.name ? ' · ' + esc(it.name) : '') : top ? `Vorschlag ${esc(top.id)} (${Math.round(top.score * 100)} %)${len ? ' · Länge messen' : ''}` : 'noch keine Teilenummer'}</div>
+      ${dup.map(x => `<div class="nm" style="white-space:normal;font-size:13px;color:var(--warn)">⚠︎ ${esc(x)}</div>`).join('')}</div></a>`;
   }
   if (all.length) h += `<div class="row2" style="margin-top:16px">${nSaved ? `<button data-a="s-showsaved">${showSaved ? 'Gespeicherte ausblenden' : `${nSaved} gespeicherte zeigen`}</button>` : ''}<button data-a="s-log">Protokoll teilen</button></div>${nSaved && showSaved ? '<div class="row2"><button data-a="s-clean">Gespeicherte vom iPhone entfernen</button></div>' : ''}`;
   return h;
 }
+/* Längliche Teile: Länge (L bzw. Noppen) wird von der Bilderkennung oft verwechselt */
+const isLong = n => /\b\d+\s*L\b|axle|achse|beam|liftarm|\b1\s*x\s*([4-9]|1\d)\b|bar\b|stange|tile.*1\s*x\s*\d|plate.*1\s*x\s*\d/i.test(String(n || ''));
 function boxInfo(c) {
   if (!c) return '';
   if (c.bad) return `<p class="miss" style="font-size:14px">${esc(c.bad)}</p>`;
@@ -172,7 +178,8 @@ function vScanItem(it) {
     if (it.err && it.err.step === 'konflikt' && it.err.current) h += `<button class="warn wide" data-a="s-force">Aktuellen Inhalt „${esc(it.err.current.parts)}“ überschreiben</button>`;
     bar = `<button data-a="s-edit">Ändern</button><button class="pri" data-a="s-save" ${saveBusy ? 'disabled' : ''}>${saveBusy === it.id ? 'Speichere …' : 'In Tabelle speichern'}</button>`;
   } else {
-    h += `<button class="wide" data-a="s-rec" ${recBusy ? 'disabled' : ''}>${recBusy === it.id ? 'Erkenne …' : (it.cands ? 'Nochmal erkennen' : 'Erkennen')}</button>`;
+    h += `<div class="row2"><button data-a="s-rec" ${recBusy ? 'disabled' : ''} style="flex:2">${recBusy === it.id ? 'Erkenne …' : (it.cands ? 'Nochmal erkennen' : 'Erkennen')}</button><a class="btn" href="#ruler" style="flex:1">Lineal</a></div>`;
+    if (it.cands && it.cands.some(c => isLong(c.name))) h += '<div class="warnbox">Längliches Teil: Länge mit dem <a href="#ruler">Lineal</a> nachmessen – die Erkennung verwechselt 3L/4L, 1×4/1×6 usw. leicht.</div>';
     if (it.cands) h += it.cands.length ? '<div class="cands">' + it.cands.map((c, i) => `<button class="cand${splitParts(it.parts)[0] === norm(c.id) ? ' sel' : ''}" data-a="s-pick" data-i="${i}" aria-label="${esc(c.id)} ${esc(c.name)} übernehmen">${img(c.img)}<span><b>${esc(c.id)}</b> <span class="mut">${Math.round(c.score * 100)} %</span></span><span class="nm">${esc(c.name)}</span></button>`).join('') + '</div>'
       : '<p class="mut">Keine Vorschläge – Nummer bitte selbst eintragen.</p>';
     h += `<label for="dparts">Teilenummer</label><input id="dparts" value="${esc(it.parts)}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="mehrere mit Komma">

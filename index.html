@@ -142,6 +142,18 @@ img.big{display:block;width:100%;max-height:45vh;object-fit:contain;background:#
 .a6 .lname{font-size:12px}
 .lmeta{font-size:12px;color:#555}
 .lbag{font-size:13px;margin-top:6px;color:#333}
+.warnchip{background:#fff4c2;color:#4d3b00;border-color:#e8d27a;margin-left:4px}
+:root{--warn:#7a5a00}
+@media(prefers-color-scheme:dark){.warnchip{background:#3d3200;color:#ffe680;border-color:#6b5800}:root{--warn:#ffd75e}}
+.ruler{display:grid;grid-template-columns:118px 1fr;gap:14px;height:calc(100dvh - env(safe-area-inset-top) - 44px - var(--tb) - env(safe-area-inset-bottom));margin:-10px -16px -40px;overflow:hidden}
+.rscale{position:relative;border-right:2px solid var(--ink);overflow:hidden}
+.tk{position:absolute;right:0;border-top:2px solid var(--ink);width:56px}
+.tk.h{width:26px;border-top:1px solid var(--ink)}
+.tk span{position:absolute;right:64px;top:-13px;font-weight:800;font-size:20px;font-variant-numeric:tabular-nums}
+.tk.M:first-of-type,.rscale .tk.M:nth-child(1){border-top-width:3px}
+.band{position:absolute;right:0;width:100%;background:var(--y);opacity:.85}
+.rside{padding:16px 16px 0 0;font-size:16px}
+.rside p{margin:0 0 10px}
 :focus-visible{outline:3px solid #0a64d8;outline-offset:2px}
 @media(prefers-color-scheme:dark){.warnbox{background:#3d3200;color:#ffe680}.errbox{background:#4a1010;color:#ffc9c9}.okbox{background:#163a1a;color:#c5f0c8}}
 @media(prefers-reduced-motion:reduce){#toast,summary::after{transition:none}}
@@ -164,8 +176,8 @@ img.big{display:block;width:100%;max-height:45vh;object-fit:contain;background:#
 <main id="main"><p class="empty">Lade …</p></main>
 <nav class="tabbar" aria-label="Bereiche"><a href="#sets" id="t-sets"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8h12l-1 12H7z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>Sets</a><a href="#box" id="t-box"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>Kästchen</a><a href="#scan" id="t-scan"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Erfassen<span class="badge" id="b-scan"></span></a><a href="#shop" id="t-shop"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l2.5 11h10L20 7H7"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/></svg>Einkauf</a><a href="#settings" id="t-settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg>Mehr</a></nav>
 <div id="toast" role="status"></div>
-<script src="scan.js?v=3.2"></script>
-<script src="backup.js?v=3.2"></script>
-<script src="app.js?v=3.2"></script>
+<script src="scan.js?v=3.3"></script>
+<script src="backup.js?v=3.3"></script>
+<script src="app.js?v=3.3"></script>
 </body>
 </html>

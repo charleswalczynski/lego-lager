@@ -60,6 +60,33 @@ function vBox(box) {
   return h;
 }
 
+/* ---------- Lineal (1 L = 1 Noppe = 8 mm), einmal am Gerät kalibrieren ---------- */
+let rulerCal = false;
+function vRuler() {
+  const k = S.settings.pxmm || 6.0, u = 8 * k, off = 14;
+  let t = '';
+  for (let i = 0; i <= 24; i++) {
+    t += `<div class="tk M" style="top:${off + i * u}px"><span>${i}</span></div><div class="tk h" style="top:${off + (i + .5) * u}px"></div>`;
+  }
+  return `<div class="ruler"><div class="rscale">${rulerCal ? `<div class="band" style="top:${off}px;height:${4 * u}px"></div>` : ''}${t}</div>
+    <div class="rside">${rulerCal
+      ? `<b>Kalibrieren</b><p>Einen <b>1×4-Stein</b> (oder 2×4, lange Seite) flach auf den gelben Balken legen, Ende an der 0-Linie. Mit − / + angleichen, bis er genau bei 4 endet.</p>
+         <div class="row2"><button data-a="r-minus" aria-label="kleiner">−</button><button data-a="r-plus" aria-label="größer">+</button></div>
+         <div class="row2"><button data-a="r-minus2" aria-label="viel kleiner">−−</button><button data-a="r-plus2" aria-label="viel größer">++</button></div>
+         <button class="pri wide" data-a="r-cal">Fertig</button>`
+      : `<p>Teil flach auflegen, ein Ende an die <b>0-Linie</b>. Zahl am anderen Ende = Länge in <b>L</b> bzw. <b>Noppen</b>.</p>
+         <p class="mut" style="font-size:14px">Halbe Striche = ½ L (z. B. Achsen mit Stopper).</p>
+         <p class="mut" style="font-size:13px">${S.settings.pxmm ? 'Kalibriert.' : 'Noch nicht kalibriert – Werte ungefähr.'}</p>
+         <button class="wide" data-a="r-cal">${S.settings.pxmm ? 'Neu kalibrieren' : 'Jetzt kalibrieren'}</button>`}</div></div>`;
+}
+document.addEventListener('click', ev => {
+  const el = ev.target.closest('[data-a^="r-"]'); if (!el) return;
+  const a = el.dataset.a, k = S.settings.pxmm || 6.0;
+  if (a === 'r-cal') { rulerCal = !rulerCal; if (!rulerCal) { S.settings.pxmm = k; save('settings'); toast('Lineal gespeichert'); } render(); return; }
+  const f = { 'r-minus': 0.996, 'r-plus': 1.004, 'r-minus2': 0.98, 'r-plus2': 1.02 }[a];
+  if (f) { S.settings.pxmm = Math.round(k * f * 1000) / 1000; render(); }
+});
+
 /* ---------- Sicherung ---------- */
 async function sha256(str) {
   const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));

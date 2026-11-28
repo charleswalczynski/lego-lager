@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '3.2';
+const VERSION = '3.3';
 const API = 'https://rebrickable.com/api/v3/lego';
 const DEFAULT_SHEET = '';
 const $ = s => document.querySelector(s);
@@ -223,6 +223,7 @@ function route() {
   if (h.startsWith('scan/')) return { v: 'scanitem', id: h.slice(5) };
   if (h.startsWith('box/')) return { v: 'box', id: h.slice(4) };
   if (h === 'box') return { v: 'boxes' };
+  if (h === 'ruler') return { v: 'ruler' };
   if (h === 'scan') return { v: 'scan' };
   if (h === 'print') return { v: 'print' };
   if (h === 'shop' || h === 'settings') return { v: h };
@@ -230,15 +231,15 @@ function route() {
 }
 function render() {
   const r = route();
-  const tab = { set: 'sets', print: 'sets', box: 'box', boxes: 'box', scanitem: 'scan' }[r.v] || r.v;
+  const tab = { set: 'sets', print: 'sets', box: 'box', boxes: 'box', scanitem: 'scan', ruler: 'scan' }[r.v] || r.v;
   for (const t of ['sets', 'box', 'scan', 'shop', 'settings']) { const e = $('#t-' + t); e.classList.toggle('on', tab === t); e.toggleAttribute('aria-current', tab === t); }
   $('#b-scan').textContent = Object.values(S.scan.items).filter(i => i.status !== 'gespeichert').length || '';
   const n = Object.keys(S.sets).length, set = r.v === 'set' ? S.sets[r.id] : null, it = r.v === 'scanitem' ? S.scan.items[r.id] : null;
-  const back = { set: '#sets', box: String(lastFrom).startsWith('#set/') ? lastFrom : '#box', scanitem: '#scan', print: r.id ? '#set/' + encodeURIComponent(r.id) : '#sets' }[r.v];
+  const back = { set: '#sets', box: String(lastFrom).startsWith('#set/') ? lastFrom : '#box', scanitem: '#scan', ruler: lastFrom && lastFrom !== '#ruler' ? lastFrom : '#scan', print: r.id ? '#set/' + encodeURIComponent(r.id) : '#sets' }[r.v];
   const bk = $('#back'); bk.hidden = !back; if (back) bk.href = back;
   $('#title').textContent = {
     sets: n ? `Sets (${n})` : 'Sets', set: set ? (set.bag ? 'Beutel ' + set.bag : set.num) : 'Set', box: 'Kästchen ' + r.id, boxes: 'Kästchen',
-    scan: 'Erfassen', scanitem: it ? 'Kästchen ' + it.box : 'Erfassen', shop: 'Einkauf', settings: 'Mehr', print: 'Etiketten'
+    scan: 'Erfassen', scanitem: it ? 'Kästchen ' + it.box : 'Erfassen', shop: 'Einkauf', settings: 'Mehr', print: 'Etiketten', ruler: 'Lineal'
   }[r.v];
   const m = $('#main');
   if (r.v === 'settings') m.innerHTML = vSettings();
@@ -247,6 +248,7 @@ function render() {
   else if (r.v === 'shop') m.innerHTML = vShop();
   else if (r.v === 'box') m.innerHTML = vBox(r.id);
   else if (r.v === 'boxes') m.innerHTML = vBoxes();
+  else if (r.v === 'ruler') m.innerHTML = vRuler();
   else if (r.v === 'print') m.innerHTML = vPrint(r.id);
   else if (r.v === 'set') m.innerHTML = set ? vSet(set) : '<p class="empty">Set nicht gefunden.</p>';
   else m.innerHTML = vSets();
@@ -356,6 +358,8 @@ function vSettings() {
   <h3 class="sec">Kästchenliste</h3>
   <p style="margin:4px 0">${l.updated ? `Stand ${esc(tm(l.updated))} · ${fmt(Object.values(l.boxes || {}).filter(b => b.parts).length)} Kästchen belegt` : 'Noch nicht geladen'}</p>
   <div class="row2"><button data-a="locs">Jetzt laden</button></div>
+  <h3 class="sec">Werkzeuge</h3>
+  <div class="row2"><a class="btn" href="#ruler">Lineal für Längen</a></div>
   <h3 class="sec">Offline</h3>
   <div class="row2"><button data-a="imgs">Bilder aller Sets laden</button></div><p class="mut" id="imgprog" style="margin:0">Einmal mit WLAN, damit im Keller alle Teilebilder da sind.</p>
   <details ${conf ? '' : 'open'}><summary>Verbindungen</summary>
